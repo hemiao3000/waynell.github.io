@@ -1,0 +1,934 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Wayne&#39;s blog</title>
+  <subtitle>每天学习一点，进步就多一点</subtitle>
+  <link href="/atom.xml" rel="self"/>
+  
+  <link href="http://blog.waynell.com/"/>
+  <updated>2016-11-04T14:14:41.000Z</updated>
+  <id>http://blog.waynell.com/</id>
+  
+  <author>
+    <name>Wayne</name>
+    
+  </author>
+  
+  <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title>从SwipeRefreshLayout看Android Animation原理</title>
+    <link href="http://blog.waynell.com/2016/11/04/android-animation/"/>
+    <id>http://blog.waynell.com/2016/11/04/android-animation/</id>
+    <published>2016-11-04T14:13:17.000Z</published>
+    <updated>2016-11-04T14:14:41.000Z</updated>
+    
+    <content type="html"><![CDATA[<p>在项目开发中，我们经常会用到SwipeRefreshLayout这个控件来做下拉刷新。当SwipeRefreshLayout做为一个Fragment的顶层View时并且在触发下拉刷新动画的情况下，会发现这个Fragment “无法被remove或者hide”，只有当刷新动画停止时Fragment才能被 “正常remove或者hide”。解释这个原因，首先得分析Animation的执行原理</p>
+<p>Android中提供了<code>View.startAnimation()</code>方法来执行一个动画效果。先来看看View中的startAnimation()方法的实现</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div></pre></td><td class="code"><pre><div class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">startAnimation</span><span class="params">(Animation animation)</span> </span>&#123;</div><div class="line">	animation.setStartTime(Animation.START_ON_FIRST_FRAME);</div><div class="line">	setAnimation(animation);</div><div class="line">	invalidateParentCaches();</div><div class="line">	invalidate(<span class="keyword">true</span>);</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>1.当执行<code>View.startAnimation()</code>方法后会先调用<code>View.setAnimation(Animation)</code>方法将这个Animation对象赋值给自己的一个名为mCurrentAnimation的成员变量</p>
+<p>2.立即调用<code>invalidate()</code>方法触发View的重绘</p>
+<p>当请求重绘时，重绘操作会从ViewRootImpl触发<code>performDraw()</code>开始，逐一向View Hierarchy分发重绘事件。首先会调用<code>View.draw(canvas)</code>函数，然后在这个draw()函数中又会调用<code>View.dispatchDraw(canvas)</code>函数</p>
+<p>3.<code>View.dispatchDraw(canvas)</code>函数在View类中只是个空方法，它在ViewGroup中被重写。ViewGroup会遍历它的child view，如果该child是visible的或者<code>child.getAnimation != null</code>，则调用<code>drawChild(canvas, child, drawingTime)</code>，<strong>所以由此看出当一个View正在执行动画时依然会被绘制，即使它的可见性不是visible的</strong></p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div></pre></td><td class="code"><pre><div class="line"><span class="function"><span class="keyword">protected</span> <span class="keyword">void</span> <span class="title">dispatchDraw</span><span class="params">(Canvas canvas)</span> </span>&#123;</div><div class="line">	<span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; childrenCount; i++) &#123;</div><div class="line">		......</div><div class="line">		<span class="keyword">int</span> childIndex = customOrder ? getChildDrawingOrder(childrenCount, i) : i;</div><div class="line">		<span class="keyword">final</span> View child = (preorderedList == <span class="keyword">null</span>)</div><div class="line">		                   ? children[childIndex] : preorderedList.get(childIndex);</div><div class="line">		<span class="keyword">if</span> ((child.mViewFlags &amp; VISIBILITY_MASK) == VISIBLE || child.getAnimation() != <span class="keyword">null</span>) &#123;</div><div class="line">			more |= drawChild(canvas, child, drawingTime);</div><div class="line">		&#125;</div><div class="line">	&#125;</div><div class="line">	......</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p><code>drawChild(canvas, child, drawingTime)</code>函数实则调用了<code>View.draw(canvas, this, drawingTime)</code>方法</p>
+<p>4.<code>View.draw(canvas, this, drawingTime)</code>函数中会判断自己是否有Animation存在，如果存在则调用<code>View.applyLegecyAnimation(parent, drawingTime, a, s)</code>函数</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div></pre></td><td class="code"><pre><div class="line"><span class="function"><span class="keyword">boolean</span> <span class="title">draw</span><span class="params">(Canvas canvas, ViewGroup parent, <span class="keyword">long</span> drawingTime)</span> </span>&#123;</div><div class="line">	......</div><div class="line"></div><div class="line">	<span class="keyword">final</span> Animation a = getAnimation();</div><div class="line">	<span class="keyword">if</span> (a != <span class="keyword">null</span>) &#123;</div><div class="line">		more = applyLegacyAnimation(parent, drawingTime, a, scalingRequired);</div><div class="line">		concatMatrix = a.willChangeTransformationMatrix();</div><div class="line">		<span class="keyword">if</span> (concatMatrix) &#123;</div><div class="line">			mPrivateFlags3 |= PFLAG3_VIEW_IS_ANIMATING_TRANSFORM;</div><div class="line">		&#125;</div><div class="line">		transformToApply = parent.getChildTransformation();</div><div class="line">	&#125;</div><div class="line"></div><div class="line">	......</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>5.<code>applyLegacyAnimation()</code>函数中主要调用了Animation的<code>getTransformation(drawingTime, t, 1f)</code>方法</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div></pre></td><td class="code"><pre><div class="line"><span class="function"><span class="keyword">private</span> <span class="keyword">boolean</span> <span class="title">applyLegacyAnimation</span><span class="params">(ViewGroup parent, <span class="keyword">long</span> drawingTime, Animation a, <span class="keyword">boolean</span> scalingRequired)</span> </span>&#123;</div><div class="line">	......</div><div class="line">	<span class="keyword">final</span> Transformation t = parent.getChildTransformation();</div><div class="line">	<span class="keyword">boolean</span> more = a.getTransformation(drawingTime, t, <span class="number">1f</span>);</div><div class="line">    ......</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>6.<code>Animation.getTransformation(drawingTime, t, 1f)</code>方法实则调用<code>Animation.getTransformation(long currentTime, Transformation outTransformation)</code></p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div></pre></td><td class="code"><pre><div class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">boolean</span> <span class="title">getTransformation</span><span class="params">(<span class="keyword">long</span> currentTime, Transformation outTransformation)</span> </span>&#123;</div><div class="line"></div><div class="line">	......</div><div class="line">	<span class="keyword">if</span> (mStartTime == -<span class="number">1</span>) &#123;</div><div class="line">		mStartTime = currentTime;</div><div class="line">	&#125;</div><div class="line"></div><div class="line">	<span class="keyword">final</span> <span class="keyword">long</span> startOffset = getStartOffset();</div><div class="line">	<span class="keyword">final</span> <span class="keyword">long</span> duration = mDuration;</div><div class="line">	<span class="keyword">float</span> normalizedTime;</div><div class="line">	<span class="keyword">if</span> (duration != <span class="number">0</span>) &#123;</div><div class="line">		normalizedTime = ((<span class="keyword">float</span>) (currentTime - (mStartTime + startOffset))) /(<span class="keyword">float</span>) duration;</div><div class="line">	&#125; <span class="keyword">else</span> &#123;</div><div class="line">		<span class="comment">// time is a step-change with a zero duration</span></div><div class="line">		normalizedTime = currentTime &lt; mStartTime ? <span class="number">0.0f</span> : <span class="number">1.0f</span>;</div><div class="line">	&#125;</div><div class="line">	......</div><div class="line"></div><div class="line">	<span class="keyword">if</span> ((normalizedTime &gt;= <span class="number">0.0f</span> || mFillBefore) &amp;&amp; (normalizedTime &lt;= <span class="number">1.0f</span> || mFillAfter)) &#123;</div><div class="line">		......</div><div class="line">		<span class="keyword">final</span> <span class="keyword">float</span> interpolatedTime = mInterpolator.getInterpolation(normalizedTime);</div><div class="line">		applyTransformation(interpolatedTime, outTransformation);</div><div class="line">	&#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>该方法中先根据参数currentTime计算当前动画的进度，动画进度在[0.0, 1.0]之间，比如一个1000ms的动画，已经执行了500ms了，那么进度就是0.5；当进度超过1.0时即表示动画已经执行完成</p>
+<p>然后将进度值传递给插值器，通过<code>mInterpolator.getInterpolation(normalizedTime)</code>得到最终的进度值</p>
+<p>7.然后根据该进度值调用<code>applyTransformation(float, Transformation)</code>方法，该方法就是真正的处理动画变化的过程，Animation中只是一个空方法，具体由它的子类实现，例如在TranslateAnimation中是这么实现的</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div></pre></td><td class="code"><pre><div class="line"><span class="function"><span class="keyword">protected</span> <span class="keyword">void</span> <span class="title">applyTransformation</span><span class="params">(<span class="keyword">float</span> interpolatedTime, Transformation t)</span> </span>&#123;</div><div class="line">	<span class="keyword">float</span> dx = mFromXDelta;</div><div class="line">	<span class="keyword">float</span> dy = mFromYDelta;</div><div class="line">	<span class="keyword">if</span> (mFromXDelta != mToXDelta) &#123;</div><div class="line">		dx = mFromXDelta + ((mToXDelta - mFromXDelta) * interpolatedTime);</div><div class="line">	&#125;</div><div class="line">	<span class="keyword">if</span> (mFromYDelta != mToYDelta) &#123;</div><div class="line">		dy = mFromYDelta + ((mToYDelta - mFromYDelta) * interpolatedTime);</div><div class="line">	&#125;</div><div class="line">	t.getMatrix().setTranslate(dx, dy);</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>8.现在回头再来看下第5步中的<code>applyLegacyAnimation()</code>函数，当调用<code>Animation.getTransformation()</code>方法后会得到返回值标识当前动画是否已经结束，如果动画还没结束则再次调用<code>parent.invalidate()</code>方法请求一次重绘</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div></pre></td><td class="code"><pre><div class="line"><span class="function"><span class="keyword">private</span> <span class="keyword">boolean</span> <span class="title">applyLegacyAnimation</span><span class="params">(ViewGroup parent, <span class="keyword">long</span> drawingTime, Animation a, <span class="keyword">boolean</span> scalingRequired)</span> </span>&#123;</div><div class="line">	<span class="keyword">boolean</span> more = a.getTransformation(drawingTime, t, <span class="number">1f</span>);</div><div class="line">	......</div><div class="line">	<span class="keyword">if</span> (more) &#123;</div><div class="line">		......</div><div class="line"></div><div class="line">		<span class="comment">// The child need to draw an animation, potentially offscreen, so</span></div><div class="line">		<span class="comment">// make sure we do not cancel invalidate requests</span></div><div class="line">		parent.mPrivateFlags |= PFLAG_DRAW_ANIMATION;</div><div class="line"></div><div class="line">		<span class="keyword">final</span> <span class="keyword">int</span> left = mLeft + (<span class="keyword">int</span>) region.left;</div><div class="line">		<span class="keyword">final</span> <span class="keyword">int</span> top = mTop + (<span class="keyword">int</span>) region.top;</div><div class="line">		parent.invalidate(left, top, left + (<span class="keyword">int</span>) (region.width() + .<span class="number">5f</span>), top + (<span class="keyword">int</span>) (region.height() + .<span class="number">5f</span>));</div><div class="line">	&#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>至此，Android Animation的执行流程就分析完了，现在在回过头来看看文章开始提出的问题：</p>
+<p>1.在SwipeRefreshLayout触发下拉刷新时，会start一个无限次数的animation来刷新转圈动画</p>
+<p>2.在remove fragment的时候会将fragment的mView对象（这时的mView对象就是SwipeRefreshLayout）从parent中remove掉，从<code>ViewGroup.removeView()</code>方法的具体实现可以得知，当被remove的view如果存在animation时，会将其先加入到一个disappearingChildren的列表中，这个列表是专门用来存放那些已经被remove但还在执行动画的View，最后再从child数组中remove该view</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div></pre></td><td class="code"><pre><div class="line"><span class="function"><span class="keyword">private</span> <span class="keyword">void</span> <span class="title">removeViewInternal</span><span class="params">(<span class="keyword">int</span> index, View view)</span> </span>&#123;</div><div class="line">	......</div><div class="line">	<span class="keyword">if</span> (view.getAnimation() != <span class="keyword">null</span> ||</div><div class="line">	        (mTransitioningViews != <span class="keyword">null</span> &amp;&amp; mTransitioningViews.contains(view))) &#123;</div><div class="line">		addDisappearingView(view);</div><div class="line">	&#125;</div><div class="line">	......</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>3.当重绘事件分发到<code>ViewGroup.dispatchDraw()</code>时会遍历disappearingChildren这个列表元素并重绘这些view</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div></pre></td><td class="code"><pre><div class="line"><span class="function"><span class="keyword">protected</span> <span class="keyword">void</span> <span class="title">dispatchDraw</span><span class="params">(Canvas canvas)</span> </span>&#123;</div><div class="line">	......</div><div class="line"></div><div class="line">	<span class="comment">// Draw any disappearing views that have animations</span></div><div class="line">	<span class="keyword">if</span> (mDisappearingChildren != <span class="keyword">null</span>) &#123;</div><div class="line">		<span class="keyword">final</span> ArrayList&lt;View&gt; disappearingChildren = mDisappearingChildren;</div><div class="line">		<span class="keyword">final</span> <span class="keyword">int</span> disappearingCount = disappearingChildren.size() - <span class="number">1</span>;</div><div class="line">		<span class="comment">// Go backwards -- we may delete as animations finish</span></div><div class="line">		<span class="keyword">for</span> (<span class="keyword">int</span> i = disappearingCount; i &gt;= <span class="number">0</span>; i--) &#123;</div><div class="line">			<span class="keyword">final</span> View child = disappearingChildren.get(i);</div><div class="line">			more |= drawChild(canvas, child, drawingTime);</div><div class="line">		&#125;</div><div class="line">	&#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>由此得出，当一个View正在执行动画时，暂时是无法被Gone掉或者从View Hierarchy中remove的，必须先将View的动画停止才行</p>
+]]></content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;在项目开发中，我们经常会用到SwipeRefreshLayout这个控件来做下拉刷新。当SwipeRefreshLayout做为一个Fragment的顶层View时并且在触发下拉刷新动画的情况下，会发现这个Fragment “无法被remove或者hide”，只有当刷新动画
+    
+    </summary>
+    
+      <category term="Dev" scheme="http://blog.waynell.com/categories/Dev/"/>
+    
+    
+      <category term="Android" scheme="http://blog.waynell.com/tags/Android/"/>
+    
+  </entry>
+  
+  <entry>
+    <title>Fresco的内存机制</title>
+    <link href="http://blog.waynell.com/2016/07/07/fresco-memory/"/>
+    <id>http://blog.waynell.com/2016/07/07/fresco-memory/</id>
+    <published>2016-07-07T10:13:05.000Z</published>
+    <updated>2016-11-05T23:31:03.000Z</updated>
+    
+    <content type="html"><![CDATA[<p>Fresco是Facebook出品的高性能图片加载库，号称在所有图片加载库中是效率、性能最好的。Fresco整个库还挺大的，还有native层。这里不对Fresco做深入分析，只关注Fresco在Android Bitmap的管理上采用了哪些黑科技</p>
+<h3 id="Android的内存区域"><a href="#Android的内存区域" class="headerlink" title="Android的内存区域"></a>Android的内存区域</h3><p><strong>Java Heap（Dalvik Heap）</strong>，这部分的内存区域是由Dalvik虚拟机管理，通过Java中<code>new</code>关键字来申请一块新内存。这块区域的内存是由GC直接管理，能够自动回收内存。这块内存的大小会受到系统限制，当内存超过APP最大可用内存时会OOM</p>
+<p><strong>Native Heap</strong>，这部分内存区域是在C++中申请的，它不受限于APP的最大可用内存限制，而只是受限于设备的物理可用内存限制。它的缺点在于没有自动回收机制，只能通过C++语法来释放申请的内存</p>
+<p><strong>Ashmem（Android匿名共享内存）</strong>，这部分内存类似于Native内存区，但是它是受Android系统底层管理的，当Android系统在内存不足时，会回收Ashmem区域中状态是<code>unpin</code>的对象内存块，如果不希望对象被回收，可以通过<code>pin</code>来保护一个对象</p>
+<p><img src="/assets/48bee9e7-88f2-4b08-9f1b-a74987080eed.jpg" alt=""></p>
+<h3 id="Purgeable-Bitmap"><a href="#Purgeable-Bitmap" class="headerlink" title="Purgeable Bitmap"></a>Purgeable Bitmap</h3><p>Ashmem一般在应用层中是无法直接访问的，除了几个特例之外。其中之一就是<strong>decode bitmap</strong>，我们可以通过设置<code>BitmapFactory.Optinons.inPurgeable = true</code>来创建一个<strong>Purgeable Bitmap</strong>，这样decode出来的bitmap是在Ashmem内存中，GC无法自动回收它。当该Bitmap在被使用时会被<strong>pin</strong>住，使用完之后就<strong>unpin</strong>，这样系统就可以在将来某一时间释放这部分内存。</p>
+<p>如果一个<strong>unpinned</strong>的bitmap在之后又要被使用，系统会运行时又将它重新decode。为了redecode bitmap，系统需要获得bitmap的编码数据，默认情况下系统会将bitmap的InputStream拷贝一份保存起来，待下次redecode时使用。但是这个decode操作是发生在UI线程中的有可能会造成掉帧现象，因此改做法已经被Google废弃掉，转为鼓励使用<code>inBitmap</code>来告知bitmap解码器去尝试使用已经存在的内存区域，新解码的bitmap会尝试去使用之前那张bitmap在heap中所占据的pixel data内存区域，而不是去问内存重新申请一块区域来存放bitmap。利用这种特性，即使是上千张的图片，也只会仅仅只需要占用屏幕所能够显示的图片数量的内存大小。</p>
+<p>但是使用<code>inBitmap</code>需要注意几个限制条件：</p>
+<ul>
+<li>在SDK 11 -&gt; 18之间，重用的bitmap大小必须是一致的，例如给inBitmap赋值的图片大小为100-100，那么新申请的bitmap必须也为100-100才能够被重用。从SDK 19开始，新申请的bitmap大小必须小于或者等于已经赋值过的bitmap大小。</li>
+<li>新申请的bitmap与旧的bitmap必须有相同的解码格式，例如大家都是8888的，如果前面的bitmap是8888，那么就不能支持4444与565格式的bitmap了。 我们可以创建一个包含多种典型可重用bitmap的对象池，这样后续的bitmap创建都能够找到合适的“模板”去进行重用。</li>
+</ul>
+<p><img src="/assets/176807f4-a989-4de0-9a31-2270cb09a7a3.jpg" alt=""></p>
+<h3 id="Pin-Bitmap"><a href="#Pin-Bitmap" class="headerlink" title="Pin Bitmap"></a>Pin Bitmap</h3><p>为了让inPurgeable的bitmap不被自动<strong>unpinned</strong>，可以通过使用jni函数<code>AndroidBitmap_lockPixels()</code>函数来强制<strong>pin bitmap</strong>，这样我们就可以在bitmap被使用时不会被系统自动<strong>unpinned</strong>，从而也就避免了<strong>unpinned</strong>的bitmap在重新被使用时又会被重新decode而引起的掉帧问题。同样的，Android也提供了<code>AndroidBitmap_unlockPixels()</code>来让bitmap重新变为<strong>unpinned</strong>状态，这样系统在内存不足时就可自动回收这部分内存</p>
+<h3 id="参考文献"><a href="#参考文献" class="headerlink" title="参考文献"></a>参考文献</h3><p><a href="http://www.slideshare.net/tyronenicholas/tips-and-tricks-for-image-handling-in-android" target="_blank" rel="external">Facebook tricks for image handling in Android</a><br><a href="http://frescolib.org/blog/2015/03/26/Introducing-Fresco.html" target="_blank" rel="external">Introducing Fresco: A new image library for Android</a><br><a href="http://blog.csdn.net/luoshengyang/article/details/6664554" target="_blank" rel="external">Android系统匿名共享内存Ashmem（Anonymous Shared Memory）驱动程序源代码分析</a></p>
+<p> <strong>欢迎大家拍砖</strong></p>
+<blockquote>
+<p>原创不易，欢迎转载，但还请注明出处：<a href="http://blog.waynell.com">blog.waynell.com</a></p>
+</blockquote>
+]]></content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;Fresco是Facebook出品的高性能图片加载库，号称在所有图片加载库中是效率、性能最好的。Fresco整个库还挺大的，还有native层。这里不对Fresco做深入分析，只关注Fresco在Android Bitmap的管理上采用了哪些黑科技&lt;/p&gt;
+&lt;h3 id=&quot;
+    
+    </summary>
+    
+      <category term="Dev" scheme="http://blog.waynell.com/categories/Dev/"/>
+    
+    
+      <category term="Android" scheme="http://blog.waynell.com/tags/Android/"/>
+    
+  </entry>
+  
+  <entry>
+    <title>Dagger2解惑</title>
+    <link href="http://blog.waynell.com/2016/06/03/deep-in-dagger2/"/>
+    <id>http://blog.waynell.com/2016/06/03/deep-in-dagger2/</id>
+    <published>2016-06-03T06:53:56.000Z</published>
+    <updated>2016-11-05T23:31:03.000Z</updated>
+    
+    <content type="html"><![CDATA[<p>最近一直在关注Android项目开发中的整体架构设计问题，<strong>如何在复杂的业务逻辑和日益膨胀的功能需求面前保持项目架构的稳定</strong>是一个很值得深入学习的问题。前段时间看到开发社区里有不少人在推崇<strong>Dagger2 + MVP</strong>模式来构建整体项目框架，MVP模式之前在项目中有使用过，MVP虽然从Activity和Fragment中抽离出了业务逻辑层，但是也不能完全解耦代码。</p>
+<p>而Dagger2的出现正好解决了这一问题，这里不谈Dagger2的使用方法，主要是分享下Dagger2的工作原理和使用中遇到的一些疑惑。</p>
+<h3 id="Dagger2的工作原理"><a href="#Dagger2的工作原理" class="headerlink" title="Dagger2的工作原理"></a>Dagger2的工作原理</h3><p>用过Dagger2的同学都知道，只要通过几个注解、Component、Module就可以实现依赖注入，再也不用写<code>new</code>了，简直太神奇了。下面就让我们揭开Dagger2神秘的面纱，看看它到底是怎么工作的</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div></pre></td><td class="code"><pre><div class="line"><span class="meta">@Singleton</span></div><div class="line"><span class="meta">@Component</span>(modules = ApplicationModule.class)</div><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">interface</span> <span class="title">ApplicationComponent</span> </span>&#123;</div><div class="line"></div><div class="line">	<span class="meta">@ApplicationContext</span></div><div class="line">    <span class="function">Context <span class="title">context</span><span class="params">()</span></span>;</div><div class="line">    </div><div class="line">    <span class="function">ApiService <span class="title">apiService</span><span class="params">()</span></span>;</div><div class="line">    </div><div class="line">    <span class="function">DataManager <span class="title">dataManager</span><span class="params">()</span></span>;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div></pre></td><td class="code"><pre><div class="line"><span class="meta">@Module</span></div><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">ApplicationModule</span> </span>&#123;</div><div class="line"></div><div class="line">    <span class="keyword">private</span> <span class="keyword">final</span> Application mApplication;</div><div class="line"></div><div class="line">    <span class="function"><span class="keyword">public</span> <span class="title">ApplicationModule</span><span class="params">(Application application)</span> </span>&#123;</div><div class="line">        mApplication = application;</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    <span class="meta">@Provides</span></div><div class="line">    <span class="meta">@ApplicationContext</span></div><div class="line">    <span class="function">Context <span class="title">provideContext</span><span class="params">()</span> </span>&#123;</div><div class="line">        <span class="keyword">return</span> mApplication;</div><div class="line">    &#125;</div><div class="line">    </div><div class="line">    <span class="meta">@Provides</span></div><div class="line">    <span class="meta">@Singleton</span></div><div class="line">    <span class="function">ApiService <span class="title">provideApiService</span><span class="params">()</span> </span>&#123;</div><div class="line">        <span class="keyword">return</span> <span class="keyword">new</span> ApiService();</div><div class="line">    &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div></pre></td><td class="code"><pre><div class="line"><span class="meta">@Singleton</span></div><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">DataManager</span> </span>&#123;</div><div class="line"></div><div class="line">	<span class="keyword">private</span> ApiService mApiService;</div><div class="line"></div><div class="line">    <span class="meta">@Inject</span></div><div class="line">    <span class="function"><span class="keyword">public</span> <span class="title">DataManager</span><span class="params">(ApiService apiService)</span> </span>&#123;</div><div class="line">        mApiService = apiService;</div><div class="line">    &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>上面代码主要有三部分组成，<strong>ApplicationComponent、ApplicationModule、DataManager（ApiService是其中一个成员变量）</strong></p>
+<p>在编译时，Dagger2会自动生成<code>ApplicationComponent</code>实例类<code>DaggerApplicationComponent</code>,如下</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div><div class="line">38</div><div class="line">39</div><div class="line">40</div><div class="line">41</div><div class="line">42</div><div class="line">43</div><div class="line">44</div><div class="line">45</div><div class="line">46</div><div class="line">47</div><div class="line">48</div><div class="line">49</div><div class="line">50</div><div class="line">51</div><div class="line">52</div><div class="line">53</div><div class="line">54</div><div class="line">55</div><div class="line">56</div><div class="line">57</div><div class="line">58</div><div class="line">59</div><div class="line">60</div><div class="line">61</div><div class="line">62</div><div class="line">63</div><div class="line">64</div><div class="line">65</div><div class="line">66</div><div class="line">67</div><div class="line">68</div><div class="line">69</div><div class="line">70</div><div class="line">71</div><div class="line">72</div><div class="line">73</div><div class="line">74</div><div class="line">75</div><div class="line">76</div><div class="line">77</div><div class="line">78</div><div class="line">79</div><div class="line">80</div><div class="line">81</div><div class="line">82</div><div class="line">83</div><div class="line">84</div><div class="line">85</div><div class="line">86</div><div class="line">87</div></pre></td><td class="code"><pre><div class="line"><span class="meta">@Generated</span>(<span class="string">"dagger.internal.codegen.ComponentProcessor"</span>)</div><div class="line"><span class="keyword">public</span> <span class="keyword">final</span> <span class="class"><span class="keyword">class</span> <span class="title">DaggerApplicationComponent</span> <span class="keyword">implements</span> <span class="title">ApplicationComponent</span> </span>&#123;</div><div class="line">   <span class="comment">// 在ApplicationModule中使用@Providers注解标识</span></div><div class="line">  <span class="keyword">private</span> Provider&lt;Context&gt; provideContextProvider;</div><div class="line">  </div><div class="line">   <span class="comment">// 在ApplicationModule中使用@Providers注解标识</span></div><div class="line">  <span class="keyword">private</span> Provider&lt;ApiService&gt; provideApiServiceProvider;</div><div class="line">  </div><div class="line">   <span class="comment">// DataManager是通过@Inject注解标识在构造函数上的隐式Provider</span></div><div class="line">  <span class="keyword">private</span> Provider&lt;DataManager&gt; dataManagerProvider;</div><div class="line"></div><div class="line">  <span class="function"><span class="keyword">private</span> <span class="title">DaggerApplicationComponent</span><span class="params">(Builder builder)</span> </span>&#123;  </div><div class="line">    <span class="keyword">assert</span> builder != <span class="keyword">null</span>;</div><div class="line">    initialize(builder);</div><div class="line">  &#125;</div><div class="line"></div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">static</span> Builder <span class="title">builder</span><span class="params">()</span> </span>&#123;  </div><div class="line">    <span class="keyword">return</span> <span class="keyword">new</span> Builder();</div><div class="line">  &#125;</div><div class="line"></div><div class="line">  <span class="function"><span class="keyword">private</span> <span class="keyword">void</span> <span class="title">initialize</span><span class="params">(<span class="keyword">final</span> Builder builder)</span> </span>&#123;  </div><div class="line">    <span class="comment">// 这里contextProvider实现类是ApplicationModule_ProvideContextFactory，</span></div><div class="line">    <span class="comment">// 而这个工厂中实际使用的是ApplicationModule</span></div><div class="line">    <span class="keyword">this</span>.provideContextProvider = ApplicationModule_ProvideContextFactory</div><div class="line">	.create(builder.applicationModule);</div><div class="line">    </div><div class="line">    <span class="comment">// 由于ApplicationModule中provideApiService()方法用了@Singleton作用域标识，</span></div><div class="line">    <span class="comment">// 所以区别于contextProvider，它用了ScopeProvider来包装了一下，</span></div><div class="line">    <span class="comment">// 通过查看ScopeProvider源码可以看出，它其实是把</span></div><div class="line">    <span class="comment">// ApplicationModule_ProvideApiServiceFactory封装了一下，</span></div><div class="line">    <span class="comment">// 当其未实例化时从factory中get一个实例出来保存其中并返回给调用者，</span></div><div class="line">    <span class="comment">// 而当它已经实例过下次再调用时，就不会再从factory中get而是直接返</span></div><div class="line">    <span class="comment">// 回之前保存的实例对象</span></div><div class="line">    <span class="keyword">this</span>.provideApiServiceProvider = ScopedProvider</div><div class="line"> 	.create(ApplicationModule_ProvideApiServiceFactory</div><div class="line"> 	.create(builder.applicationModule));</div><div class="line">    </div><div class="line">    <span class="comment">// dataManagerProvider有别于apiServiceProvider，</span></div><div class="line">    <span class="comment">// 前者是通过构造函数提供的隐式provider，</span></div><div class="line">    <span class="comment">// 而后者是通过ApplicationMoudule用@Provider注解显示提供的provider，</span></div><div class="line">    <span class="comment">// 两者没有本质上的区别，只是写法上的不一样</span></div><div class="line">    <span class="keyword">this</span>.dataManagerProvider = ScopedProvider</div><div class="line">    	.create(DataManager_Factory.create(provideApiServiceProvider));</div><div class="line">  &#125;</div><div class="line"></div><div class="line">  <span class="meta">@Override</span></div><div class="line">  <span class="function"><span class="keyword">public</span> Context <span class="title">context</span><span class="params">()</span> </span>&#123;  </div><div class="line">  <span class="comment">// 这里实际调用的是applicationModule.provideContext()方法</span></div><div class="line">    <span class="keyword">return</span> provideContextProvider.get();</div><div class="line">  &#125;</div><div class="line"></div><div class="line">  <span class="meta">@Override</span></div><div class="line">  <span class="function"><span class="keyword">public</span> ApiService <span class="title">apiService</span><span class="params">()</span> </span>&#123;  </div><div class="line">  <span class="comment">// 这里实际调用的是applicationModule.provideApiService()方法</span></div><div class="line">    <span class="keyword">return</span> provideApiServiceProvider.get();</div><div class="line">  &#125;</div><div class="line"></div><div class="line">  <span class="meta">@Override</span></div><div class="line">  <span class="function"><span class="keyword">public</span> DataManager <span class="title">dataManager</span><span class="params">()</span> </span>&#123;</div><div class="line">   <span class="comment">// 这里实际调用的是new DataManager(provideApiServiceProvider.get())</span></div><div class="line">    <span class="keyword">return</span> dataManagerProvider.get();</div><div class="line">  &#125;</div><div class="line"></div><div class="line">  <span class="comment">// 这里的Builder类就是暴露给外部代码使用的，</span></div><div class="line">  <span class="comment">// 通过该Builder传入Component的依赖和Module，并通过build()方法实例Component</span></div><div class="line">  <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> <span class="class"><span class="keyword">class</span> <span class="title">Builder</span> </span>&#123;</div><div class="line">    <span class="keyword">private</span> ApplicationModule applicationModule;</div><div class="line">  </div><div class="line">    <span class="function"><span class="keyword">private</span> <span class="title">Builder</span><span class="params">()</span> </span>&#123;  </div><div class="line">    &#125;</div><div class="line">  </div><div class="line">    <span class="function"><span class="keyword">public</span> ApplicationComponent <span class="title">build</span><span class="params">()</span> </span>&#123;  </div><div class="line">      <span class="keyword">if</span> (applicationModule == <span class="keyword">null</span>) &#123;</div><div class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> IllegalStateException(<span class="string">"applicationModule must be set"</span>);</div><div class="line">      &#125;</div><div class="line">      <span class="keyword">return</span> <span class="keyword">new</span> DaggerApplicationComponent(<span class="keyword">this</span>);</div><div class="line">    &#125;</div><div class="line">  </div><div class="line">    <span class="function"><span class="keyword">public</span> Builder <span class="title">applicationModule</span><span class="params">(ApplicationModule applicationModule)</span> </span>&#123;  </div><div class="line">      <span class="keyword">if</span> (applicationModule == <span class="keyword">null</span>) &#123;</div><div class="line">        <span class="keyword">throw</span> <span class="keyword">new</span> NullPointerException(<span class="string">"applicationModule"</span>);</div><div class="line">      &#125;</div><div class="line">      <span class="keyword">this</span>.applicationModule = applicationModule;</div><div class="line">      <span class="keyword">return</span> <span class="keyword">this</span>;</div><div class="line">    &#125;</div><div class="line">  &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>从上面的代码可以看出<code>ApplicationComponent</code>构建了一系列<code>Provider</code>，而这些<code>Provider</code>最后在对象注入时使用的，来看下一下代码</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div></pre></td><td class="code"><pre><div class="line"><span class="meta">@PerActivity</span></div><div class="line"><span class="meta">@Component</span>(dependencies = ApplicationComponent.class, modules = ActivityModule.class)</div><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">interface</span> <span class="title">ActivityComponent</span> </span>&#123;</div><div class="line">    <span class="function"><span class="keyword">void</span> <span class="title">inject</span><span class="params">(MainActivity activity)</span></span>;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div></pre></td><td class="code"><pre><div class="line"><span class="meta">@Module</span></div><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">ActivityModule</span> </span>&#123;</div><div class="line">    <span class="keyword">private</span> <span class="keyword">final</span> Activity mActivity;</div><div class="line"></div><div class="line">    <span class="function"><span class="keyword">public</span> <span class="title">ActivityModule</span><span class="params">(Activity activity)</span> </span>&#123;</div><div class="line">        mActivity = activity;</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    <span class="meta">@Provides</span></div><div class="line">    <span class="meta">@ActivityContext</span></div><div class="line">    <span class="function">Context <span class="title">providesContext</span><span class="params">()</span> </span>&#123;</div><div class="line">        <span class="keyword">return</span> mActivity;</div><div class="line">    &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">MainActivity</span> <span class="keyword">extends</span> <span class="title">BaseActivity</span> </span>&#123;</div><div class="line">	<span class="meta">@Inject</span></div><div class="line">    DataManager mDataManager;</div><div class="line">    </div><div class="line">    ......</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p><code>ActivityComponet</code>是依赖于<code>ApplicationComponent</code>，所以它可以获得<code>ApplicationComponent</code>构建的一系列Provider，<code>MainActivity</code>是需要注入的对象，最终<code>MainActivity.mDataManager</code>变量会被注入赋值</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div></pre></td><td class="code"><pre><div class="line"><span class="meta">@Generated</span>(<span class="string">"dagger.internal.codegen.ComponentProcessor"</span>)</div><div class="line"><span class="keyword">public</span> <span class="keyword">final</span> <span class="class"><span class="keyword">class</span> <span class="title">DaggerActivityComponent</span> <span class="keyword">implements</span> <span class="title">ActivityComponent</span> </span>&#123;</div><div class="line">	<span class="keyword">private</span> Provider&lt;DataManager&gt; dataManagerProvider;</div><div class="line">	<span class="keyword">private</span> MembersInjector&lt;MainActivity&gt; mainActivityMembersInjector;</div><div class="line">    </div><div class="line">    <span class="function"><span class="keyword">private</span> <span class="keyword">void</span> <span class="title">initialize</span><span class="params">(<span class="keyword">final</span> Builder builder)</span> </span>&#123;</div><div class="line">    	<span class="comment">// 从这里可以看出dataManagerProvider实际调用的是</span></div><div class="line">        <span class="comment">// applicationComponent.dataManager()</span></div><div class="line">        </div><div class="line">        <span class="keyword">this</span>.dataManagerProvider = <span class="keyword">new</span> Factory&lt;DataManager&gt;() &#123;</div><div class="line">          <span class="meta">@Override</span> <span class="function"><span class="keyword">public</span> DataManager <span class="title">get</span><span class="params">()</span> </span>&#123;</div><div class="line">            DataManager provided = builder.applicationComponent.dataManager();</div><div class="line">            <span class="keyword">if</span> (provided == <span class="keyword">null</span>) &#123;</div><div class="line">              <span class="keyword">throw</span> <span class="keyword">new</span> NullPointerException(<span class="string">"Cannot return null from a non-@Nullable component method"</span>);</div><div class="line">            &#125;</div><div class="line">            <span class="keyword">return</span> provided;</div><div class="line">          &#125;</div><div class="line">        &#125;;</div><div class="line">        </div><div class="line">        <span class="comment">// 这里是创建了MainActivity注入器，</span></div><div class="line">        <span class="comment">// 目的是为MainActivity中用@Inject注解标识的成员变量注入实例</span></div><div class="line">        <span class="keyword">this</span>.mainActivityMembersInjector = MainActivity_MembersInjector</div><div class="line">        	.create((MembersInjector) MembersInjectors.noOp(),</div><div class="line">            	dataManagerProvider);</div><div class="line">   &#125;</div><div class="line">   </div><div class="line">   <span class="meta">@Override</span></div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">inject</span><span class="params">(MainActivity activity)</span> </span>&#123; </div><div class="line">  	<span class="comment">// 当在外部调用该方法时，实际是为mDataManager赋值了，等同于</span></div><div class="line">	<span class="comment">// activity.mDataManager = dataManagerProvider.get();</span></div><div class="line">    </div><div class="line">	mainActivityMembersInjector.injectMembers(activity);</div><div class="line">  &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<h3 id="Dagger2的那些坑"><a href="#Dagger2的那些坑" class="headerlink" title="Dagger2的那些坑"></a>Dagger2的那些坑</h3><p>分析完Dagger2的工作原理后，让我们来看看在实际使用过程中会遇到哪些坑</p>
+<ol>
+<li><p>component 的 inject 函数不要声明基类参数<br> 如<code>MainActivity</code>和<code>SettingActivity</code>都是继承于<code>BaseActivity</code>，那么在注入时只能指定<code>MainActivity</code>和<code>SettingActivity</code>，而不能想当然的使用基类<code>BaseActivity</code>，这样子类是不会被注入的。这样就会带来一个问题，如果说我们很多的Activity都需要注入，那么在<code>ActivityComponet</code>中我就需要这么写(是不是很蛋疼 ~_~!!!)</p>
+ <figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div></pre></td><td class="code"><pre><div class="line"><span class="function"><span class="keyword">void</span> <span class="title">inject</span><span class="params">(MainActivity activity)</span></span>;</div><div class="line"><span class="function"><span class="keyword">void</span> <span class="title">inject</span><span class="params">(LoginActivity activity)</span></span>;</div><div class="line"><span class="function"><span class="keyword">void</span> <span class="title">inject</span><span class="params">(RegisterActivity activity)</span></span>;</div><div class="line"><span class="function"><span class="keyword">void</span> <span class="title">inject</span><span class="params">(AccountAuthActivity activity)</span></span>;</div><div class="line"><span class="function"><span class="keyword">void</span> <span class="title">inject</span><span class="params">(UserInfoEditActivity activity)</span></span>;</div><div class="line"><span class="function"><span class="keyword">void</span> <span class="title">inject</span><span class="params">(UserStatusActivity activity)</span></span>;</div><div class="line"><span class="function"><span class="keyword">void</span> <span class="title">inject</span><span class="params">(UserBindRescuerActivity activity)</span></span>;</div><div class="line">......</div></pre></td></tr></table></figure>
+</li>
+<li><p>Scope 注解必须用在 module 的 provide 方法上，否则并不能达到局部单例的效果</p>
+</li>
+<li><p>如果 module 的 provide 方法使用了 scope 注解，那么 component 就必须使用同一个注解，否则编译会失败</p>
+</li>
+<li><p>如果 module 的 provide 方法没有使用 scope 注解，那么 component 和 module 是否加注解都无关紧要，可以通过编译，但是没有局部单例效果；</p>
+</li>
+<li><p>对于直接使用 @Inject 构造函数的依赖，如果把 scope 注解放到它的类上，而不是构造函数上，就能达到局部单例的效果了；</p>
+</li>
+</ol>
+<h3 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h3><p>至此，Dagger2的整个注入流程我们就分析完了，其实也不算复杂，只是使用了大量的设计模式，分析代码时跳来跳去的容易把人搞晕。Dagger2的出现是解耦了代码，但是同时也带来了其它的一些问题，比如：引入大量Component后期<strong>管理、维护就很非常困难</strong>，<strong>Component划分粒度问题</strong>，<strong>当业务逻辑存在重复或者相似性时如何重用Component</strong>等等，这些都是需要进一步学习和思考。</p>
+<p><strong>欢迎大家拍砖</strong></p>
+<blockquote>
+<p>原创不易，欢迎转载，但还请注明出处：<a href="http://blog.waynell.com">blog.waynell.com</a></p>
+</blockquote>
+]]></content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;最近一直在关注Android项目开发中的整体架构设计问题，&lt;strong&gt;如何在复杂的业务逻辑和日益膨胀的功能需求面前保持项目架构的稳定&lt;/strong&gt;是一个很值得深入学习的问题。前段时间看到开发社区里有不少人在推崇&lt;strong&gt;Dagger2 + MVP&lt;/stron
+    
+    </summary>
+    
+      <category term="Dev" scheme="http://blog.waynell.com/categories/Dev/"/>
+    
+    
+      <category term="Android" scheme="http://blog.waynell.com/tags/Android/"/>
+    
+  </entry>
+  
+  <entry>
+    <title>视频在滑动列表中的异步缓存和播放</title>
+    <link href="http://blog.waynell.com/2016/03/21/video-loader/"/>
+    <id>http://blog.waynell.com/2016/03/21/video-loader/</id>
+    <published>2016-03-21T02:50:01.000Z</published>
+    <updated>2016-11-05T23:31:03.000Z</updated>
+    
+    <content type="html"><![CDATA[<p>最近在Github上看到<strong><a href="https://github.com/danylovolokh/VideoPlayerManager" target="_blank" rel="external">VideoPlayerManager</a></strong>这么一个项目，目的在是ListView和RecyclerView中播放小视频，模仿了Instagram中滑动到可见视频项时开始播放该视频，滑动至不可见时停止视频播放的功能</p>
+<p>但是该项目存在几个问题：</p>
+<ol>
+<li>快速上下滑动列表后，无法再播放视频，有时还会直接Crash</li>
+<li>不支持网络视频的异步缓存</li>
+</ol>
+<p>故在该项目的基础上进行了优化，并且支持网络视频的异步缓存</p>
+<h2 id="网络视频的异步缓存"><a href="#网络视频的异步缓存" class="headerlink" title="网络视频的异步缓存"></a>网络视频的异步缓存</h2><p>视频的缓存其实跟图片缓存大致是一样的，现在图片缓存框架很多，但是根本原理都是网络下载+内存缓存+本地缓存这三大块组成。而视频的缓存只需要跳过内存缓存就可以了，当发视频文件未下载时就去下载并本地缓存，下次就直接从本地缓存读取视频文件信息，所以基于图片缓存框架不难实现视频文件的缓存功能。</p>
+<p>这里我采用了Glide来实现视频缓存，Glide不仅支持图片缓存还支持对普通文件缓存，所以使用Glide可以很简单的就能实现视频文件的缓存</p>
+<h2 id="基于TextureView的视频播放控件"><a href="#基于TextureView的视频播放控件" class="headerlink" title="基于TextureView的视频播放控件"></a>基于TextureView的视频播放控件</h2><p>Android原生提供了一个视频播放控件 - <strong>VideoView</strong>，但VideoView是基于<strong>SurfaceView</strong>实现的，SurfaceView会单独一个窗口用来绘制，它不在View hierachy中，显示也不受View的属性控制，不能进行平移，缩放等变换，也难以放在ListView或者ScrollView中，一些View中的特性也无法使用。</p>
+<p>为了弥补SurfaceView的不足，Android在4.0中加入了<strong>TextureView</strong>，它并没有创建一个单独的窗口用来绘制，这使得它可以像一般的View一样执行一些变换操作，设置透明度等，也很方便的放在其它ViewGroup中</p>
+<p>所以要在ListView或者RecyclerView中播放视频，我们就需要实现基于TextureView的VideoView，实现代码参考ViewVideo就可以了</p>
+<h2 id="视频在滑动列表中的自动播放和停止"><a href="#视频在滑动列表中的自动播放和停止" class="headerlink" title="视频在滑动列表中的自动播放和停止"></a>视频在滑动列表中的自动播放和停止</h2><p>要实现视频的自动播放和停止，我们需要计算每个item中列表中的可见比。比如当某item可见比大于70%时，则该item视为可见的，激活视频播放。反之视为不可见，停止视频播放</p>
+<p>这里简单说下实现原理，主要分为下面三步</p>
+<ol>
+<li><p>在列表滑动时，判断滑动方向</p>
+</li>
+<li><p>根据滑动方向判断相邻的item是否视为可见，比如在下滑列表时，当前可见item的可见比在逐渐减小，而下一项的可见比在逐渐加大，当前item可见比低于70%时停止播放，下一项可见比大于70%时就开始播放</p>
+</li>
+<li><p>在快速滑动列表时，不检测item的变化（避免卡顿）；在滑动停止时，查找当前可见item中可见比最大的item，如果该item和之前可见的item不一样时，则激活该item</p>
+</li>
+</ol>
+<h2 id="列表中视频播放的性能问题"><a href="#列表中视频播放的性能问题" class="headerlink" title="列表中视频播放的性能问题"></a>列表中视频播放的性能问题</h2><p>视频的播放主要使用了MediaPlayer，MediaPlayer的状态图如下所示：</p>
+<p><img src="/assets/mediaplayer_state_diagram.gif" alt="state diagram"></p>
+<p>从图中可以看出，视频在开始播放前需要首先通过<code>setDataSource()</code>进行初始化，然后通过<code>prepare()</code>或者<code>prepareAsync()</code>进行播放前准备工作，最后准备完成后通过<code>start()</code>操作才开始播放视频</p>
+<p>其中<code>prepare()</code>操作是相当耗时的，这一步操作绝不应该在UI线程中调用，而<code>prepareAsync()</code>则是使用异步的方式调用，所以在list列表中播放视频应该使用<code>prepareAsync()</code>来准备视频</p>
+<p>光靠<code>prepareAsync()</code>这一步，可不足以保证list滑动时每帧耗时不超过16ms，像<code>setDataSource()</code>,<code>reset()</code>,<code>release()</code>这些操作都是比较耗时的，虽然达不到引起ANR的程度，但是对于list滑动的流畅性却影响很大</p>
+<h2 id="解决方案"><a href="#解决方案" class="headerlink" title="解决方案"></a>解决方案</h2><p>这里我采用了将MediaPlayer的全部操作都放在一个单独的线程中去处理，事件回调则通过ui Handler post回ui线程，这样就可以保证list滑动的流畅性</p>
+<h2 id="效果预览"><a href="#效果预览" class="headerlink" title="效果预览"></a>效果预览</h2><p><img src="/assets/2016_03_24_15_06_33_364-482.gif" alt=""></p>
+<p><img src="/assets/2016_03_24_15_06_33_364-481.gif" alt=""></p>
+<p>代码具体的使用和详细实现方法都已放到Github上</p>
+<p><strong>项目地址：<a href="https://github.com/waynell/VideoListPlayer" target="_blank" rel="external">VideoListPlayer</a></strong></p>
+<p><strong>欢迎大家拍砖</strong></p>
+<blockquote>
+<p>原创不易，欢迎转载，但还请注明出处：<a href="http://blog.waynell.com">blog.waynell.com</a></p>
+</blockquote>
+]]></content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;最近在Github上看到&lt;strong&gt;&lt;a href=&quot;https://github.com/danylovolokh/VideoPlayerManager&quot; target=&quot;_blank&quot; rel=&quot;external&quot;&gt;VideoPlayerManager&lt;/a&gt;&lt;/s
+    
+    </summary>
+    
+      <category term="Dev" scheme="http://blog.waynell.com/categories/Dev/"/>
+    
+    
+      <category term="Android" scheme="http://blog.waynell.com/tags/Android/"/>
+    
+  </entry>
+  
+  <entry>
+    <title>【转】Android应用架构</title>
+    <link href="http://blog.waynell.com/2015/12/16/android-architecture/"/>
+    <id>http://blog.waynell.com/2015/12/16/android-architecture/</id>
+    <published>2015-12-16T03:13:27.000Z</published>
+    <updated>2016-11-05T23:31:03.000Z</updated>
+    
+    <content type="html"><![CDATA[<p>Android开发生态圈的节奏非常之快。每周都会有新的工具诞生，类库的更新，博客的发表以及技术探讨。如果你外出度假一个月，当你回来的时候可能已经发布了新版本的Support Library或者Play Services</p>
+<p>我与<a href="http://ribot.co.uk/us/" target="_blank" rel="external">Ribot Team</a>一起做Android应用已经超过三年了。这段时间，我们所构建的Android应用架构和技术也在不断地演变。本文将向您阐述我们的经验，错误以及架构变化背后的原因。</p>
+<h2 id="曾经的架构"><a href="#曾经的架构" class="headerlink" title="曾经的架构"></a>曾经的架构</h2><p>追溯到2012年我们的代码库使用的是基本结构，那个时候我们没有使用任何第三方网络类库，而且<strong>AsyncTask</strong>也是我们的好朋友。当时的架构可以大致表示为下图。</p>
+<p><img src="/assets/1450098209137637.png" alt=""></p>
+<p>代码被划分为两层结构：<strong>Data Layer（数据层）</strong>负责从REST API或者持久数据存储区检索和存储数据；<strong>View Layer（视图层）</strong>的职责是处理并将数据展示在UI上。</p>
+<p><strong>APIProvider</strong>提供了一些方法，使Activity和Fragment能够很容易的实现与REST API的数据交互。这些方法使用URLConnection和AsyncTask在一个单独的线程内执行网络请求，然后通过回调将结果返回给Activity。</p>
+<p>按照同样的方式，<strong>CacheProvider</strong> 所包含的方法负责从SharedPreferences和SQLite数据库检索和存储数据。同样使用回调的方式，将结果传回Activity。</p>
+<p>存在的问题：</p>
+<p>使用这种结构，最主要的问题在于<strong>View Layer</strong>持有太多的职责。想象一个简单且常见的场景，应用需要加载一个博客文章列表，然后缓存这些条目到SQLite数据库，最后将他们展示到ListView等列表视图上。Activity要做到以下几个步骤：</p>
+<ul>
+<li><p>通过APIProvider调用<code>loadPosts</code>方法（回调）</p>
+</li>
+<li><p>等待APIProvider的回调结果，然后调用CacheProvider中的<code>savePosts</code>方法（回调）</p>
+</li>
+<li><p>等待CacheProvider的回调结果，然后将这些文章展示到ListView等列表视图上</p>
+</li>
+<li><p>分别处理APIProvider和CacheProvider回调中潜在的异常。</p>
+</li>
+</ul>
+<p>这是一个非常简单的例子，在实际开发环境中REST API返回的数据可能并不是View直接需要的。因此，Activity在进行展示之前不得不通过某种方式将数据进行转换或过滤。另一个常见的情况是，调用<code>loadPosts( )</code>所需要的参数，需要事先从其他地方获取到，比如，需要Play Services SDK提供一个Email地址参数。就像SDK通过异步回调的方式返回Email地址，这就意味着现在我们至少有三层嵌套的回调。如果继续添加复杂的业务逻辑，这种架构就会陷入众所周知的<strong>Callback Hell（回调地狱）</strong>。</p>
+<p>总结：</p>
+<ul>
+<li><p>Activitty和Fragment变得非常庞大并且难以维护。</p>
+</li>
+<li><p>太多的回调嵌套意味着丑陋的代码结构而且不易读懂和理解。如果在这个基础上做更改或者添加新特性会感到很痛苦。</p>
+</li>
+<li><p>单元测试变得非常有挑战性，如果有可能的话，因为很多逻辑都留在了Activity或者Fragment中，这样进行单元测试是很艰难的。</p>
+</li>
+</ul>
+<h2 id="RxJava驱动的新型架构"><a href="#RxJava驱动的新型架构" class="headerlink" title="RxJava驱动的新型架构"></a>RxJava驱动的新型架构</h2><p>我们使用上文提到的组织架构差不多两年的时间。在那段时间内，我们做了一些改进，稍微缓解了上述问题。例如，我们添加了一些<strong>Helper Class（帮助类）</strong>用来减少Activity和Fragment中的代码，在<strong>APIProvider</strong>中使用了<a href="http://developer.android.com/training/volley/index.html" target="_blank" rel="external">Volley</a>。尽管做出了这些改变，我们应用程序的代码还是不能进行友好的测试，并且<strong>Callback Hell（回调地狱）</strong>的问题还是经常发生。</p>
+<p>直到2014年我们开始了解<a href="http://reactivex.io/" target="_blank" rel="external">RxJava</a>。在尝试了几个示例项目之后，我们意识到她可能最终帮助我们解决掉嵌套回调的问题。如果你还不熟悉响应式编程，可以阅读<a href="https://gist.github.com/staltz/868e7e9bc2a7b8c1f754" target="_blank" rel="external">本文</a>（译者注：译文点这里<a href="https://github.com/yaoqinwei/android-tech-frontier/tree/master/androidweekly/%E9%82%A3%E4%BA%9B%E5%B9%B4%E6%88%91%E4%BB%AC%E9%94%99%E8%BF%87%E7%9A%84%E5%93%8D%E5%BA%94%E5%BC%8F%E7%BC%96%E7%A8%8B" target="_blank" rel="external">那些年我们错过的响应式编程</a>）。简而言之，<strong>RxJava允许通过异步流的方式处理数据，并且提供了很多操作符，你可以将这些操作符作用于流上从而实现转换，过滤或者合并数据等操作</strong>。</p>
+<p>考虑到经历了前几年的痛苦，我们开始考虑，一个新的应用程序体系架构看起来会是怎样的。因此，我们想出了这个。</p>
+<p><img src="/assets/1450098244862313.png" alt=""></p>
+<p>类似于第一种架构，这种体系架构同样被划分为<strong>Data Layer</strong>和<strong>View Layer</strong>。<strong>Data Layer</strong>持有<code>DataManager</code>和一系列的<strong>Helper classe </strong>。<strong>View Layer</strong>由Android的Framework组件组成，例如，Fragment，Activity，ViewGroup等。</p>
+<p><strong>Helper classes</strong>（图标中的第三列）有着非常特殊的职责以及简洁的实现方式。例如，很多项目需要一些帮助类对REST API进行访问，从数据库读取数据，或者与三方SDK进行交互等。不同的应用拥有不同数量的帮助类，但也存在着一些共性：</p>
+<ul>
+<li><ul>
+<li>PreferencesHelper：从<code>SharedPreferences</code>读取和存储数据。</li>
+</ul>
+</li>
+<li><p>DatabaseHelper：处理操作SQLite数据库。</p>
+</li>
+<li><p><a href="https://github.com/square/retrofit" target="_blank" rel="external">Retrofit</a> services：执行访问REST API，我们现在使用Retrofit来代替Volley，因为它天生支持RxJava。而且也更好用。</p>
+</li>
+</ul>
+<p>帮助类里面的大多数public方法都会返回RxJava的<strong>Observable</strong>。</p>
+<p><strong>DataManager</strong>是整个架构中的大脑。它广泛的使用了RxJava的操作符用来合并，过滤和转换从帮助类中返回的数据。DataManager旨在减少Activity和Fragment的工作量，它们（译者注：指Activity和Fragment）要做的就是展示已经准备好的数据而不需要再进行转换了。</p>
+<p>下面这段代码展示了一个DataManager方法可能的样子。这个简单的示例方法如下：</p>
+<ul>
+<li><p>调用Retrofit service从REST API加载一个博客文章列表</p>
+</li>
+<li><p>使用DatabaseHelper保存文章到本地数据库，达到缓存的目的</p>
+</li>
+<li><p>筛选出今天发表的博客，因为那才是<strong>View Layer</strong>想要展示的。</p>
+</li>
+</ul>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div></pre></td><td class="code"><pre><div class="line"><span class="function"><span class="keyword">public</span> Observable&lt;Post&gt; <span class="title">loadTodayPosts</span><span class="params">()</span> </span>&#123;</div><div class="line">       <span class="keyword">return</span> mRetrofitService.loadPosts()</div><div class="line">              .concatMap(<span class="keyword">new</span> Func1&lt;List&lt;Post&gt;, Observable&lt;Post&gt;&gt;() &#123;</div><div class="line">                    <span class="meta">@Override</span></div><div class="line">                    <span class="function"><span class="keyword">public</span> Observable&lt;Post&gt; <span class="title">call</span><span class="params">(List&lt;Post&gt; apiPosts)</span> </span>&#123;</div><div class="line">                         <span class="keyword">return</span> mDatabaseHelper.savePosts(apiPosts);</div><div class="line">                        &#125;</div><div class="line">                    &#125;)</div><div class="line">              .filter(<span class="keyword">new</span> Func1&lt;Post, Boolean&gt;() &#123;</div><div class="line">                    <span class="meta">@Override</span></div><div class="line">                    <span class="function"><span class="keyword">public</span> Boolean <span class="title">call</span><span class="params">(Post post)</span> </span>&#123;</div><div class="line">                         <span class="keyword">return</span> isToday(post.date);</div><div class="line">                   &#125;</div><div class="line">       &#125;);</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>在<strong>View Layer</strong>中诸如Activity或者Fragment等组件只需调用这个方法，然后订阅返回的<code>Observable</code>即可。一旦订阅完成，通过Observable发送的不同博客，就能够立即被添加进Adapter从而展示到RecyclerView或其他类似控件上。</p>
+<p>这个架构的最后元素就是<strong>Event Bus（事件总线）</strong>。它允许我们在<strong>Data Layer</strong>中发送事件，以便<strong>View Layer</strong>中的多个组件都能够订阅到这些事件。比如DataManager中的退出登录方法可以发送一个事件，订阅这个事件的多个Activity在接收到该事件后就能够更改它们的UI视图，从而显示一个登出状态。</p>
+<p>为什么这种架构更好？</p>
+<ul>
+<li><p>RxJava的Observable和操作符避免了嵌套回调的出现。</p>
+</li>
+<li><p>DataManager接管了以前<strong>View Layer</strong>的部分职责。因此，它使Activity和Fragment变得更轻量了。</p>
+</li>
+<li><p>将代码从Activity和Fragment转移到了DataManager和帮助类中，就意味着使写单元测试变得更简单。</p>
+</li>
+<li><p>明确的职责分离和DataManager作为唯一与<strong>Data Layer</strong>进行交互的点，使这个架构变得<strong>Test-Friendly</strong>。帮助类和DataManager能够很容易的被模拟出来。</p>
+</li>
+</ul>
+<p>我们还存在什么问题？</p>
+<ul>
+<li><p>对于庞大和复杂的项目来讲，DataManager会变得非常的臃肿和难以维护。</p>
+</li>
+<li><p>尽管<strong>View Layer</strong>诸如Activity和Fragment等组件变得更轻量，它们让然要处理大量的逻辑，如管理RxJava的订阅，解析错误等方面。</p>
+</li>
+</ul>
+<h2 id="集成MVP"><a href="#集成MVP" class="headerlink" title="集成MVP"></a>集成MVP</h2><p>在过去的一年中，几个架构设计模式，如<a href="https://en.wikipedia.org/wiki/Model%E2%80%93view%E2%80%93presenter" target="_blank" rel="external">MVP</a>或者<a href="https://en.wikipedia.org/wiki/Model%E2%80%93view%E2%80%93viewmodel" target="_blank" rel="external">MVVM</a>在Android社区内已经越来越受欢迎了。通过在<a href="http://www.jianshu.com/p/%5Bsample%20project%5D(https://github.com/ivacf/archi" target="_blank" rel="external">示例工程</a>)和<a href="https://medium.com/ribot-labs/approaching-android-with-mvvm-8ceec02d5442#.x98dqfu6m" target="_blank" rel="external">文章</a>中进行探索后，我们发现MVP，可能给我们现有的架构带来非常价值的改进。因为当前我们的架构已经被划分为两个层（视图层和数据层），添加MVP会更自然些。我们只需要添加一个新的presenter层，然后将View中的部分代码转移到presenter就行了。</p>
+<p><img src="/assets/1450098335102648.png" alt=""></p>
+<p>留下的<strong>Data Layer</strong>保持不变，只不过为了与这种模式保持一致性，它现在被叫做<strong>Model</strong>。</p>
+<p><strong>Presenter</strong>负责从<strong>Model</strong>中加载数据，然后当数据准备好之后调用<strong>View</strong>中相对应的方法。还负责订阅<strong>DataManager</strong>返回的<strong>Observable</strong>。所以，他们还需要处理<a href="http://reactivex.io/documentation/scheduler.html" target="_blank" rel="external">schedulers</a>和<a href="http://reactivex.io/RxJava/javadoc/rx/Subscription.html" target="_blank" rel="external">subscriptions</a>。此外，它们还能分析错误代码或者在需要的情况下为数据流提供额外的操作。例如，如果我们需要过滤一些数据而且这个相同的过滤器是不可能被重用在其他地方的，这样的话在<strong>Presenter</strong>中实现比在<strong>DataManager</strong>中或许更有意义。</p>
+<p>下面你将看到在<strong>Presenter</strong>中一个public方法将是什么样子。这段代码订阅我们在前一节中定义的<code>dataManager.loadTodayPosts( )</code>所返回的Observable。</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div></pre></td><td class="code"><pre><div class="line"><span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">loadTodayPosts</span><span class="params">()</span> </span>&#123;</div><div class="line">    mMvpView.showProgressIndicator(<span class="keyword">true</span>);</div><div class="line">    mSubscription = mDataManager.loadTodayPosts().toList()</div><div class="line">            .observeOn(AndroidSchedulers.mainThread())</div><div class="line">            .subscribeOn(Schedulers.io())</div><div class="line">            .subscribe(<span class="keyword">new</span> Subscriber&lt;List&lt;Post&gt;&gt;() &#123;</div><div class="line">                <span class="meta">@Override</span></div><div class="line">                <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">onCompleted</span><span class="params">()</span> </span>&#123;</div><div class="line">                    mMvpView.showProgressIndicator(<span class="keyword">false</span>);</div><div class="line">                &#125;</div><div class="line"> </div><div class="line">                <span class="meta">@Override</span></div><div class="line">                <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">onError</span><span class="params">(Throwable e)</span> </span>&#123;</div><div class="line">                    mMvpView.showProgressIndicator(<span class="keyword">false</span>);</div><div class="line">                    mMvpView.showError();</div><div class="line">                &#125;</div><div class="line"> </div><div class="line">                <span class="meta">@Override</span></div><div class="line">                <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">onNext</span><span class="params">(List&lt;Post&gt; postsList)</span> </span>&#123;</div><div class="line">                    mMvpView.showPosts(postsList);</div><div class="line">                &#125;</div><div class="line">            &#125;);</div><div class="line">    &#125;</div></pre></td></tr></table></figure>
+<p><code>mMvpView</code>是与<strong>Presenter</strong>一起协助的View组件。通常情况下是一个Activity，Fragment或者ViewGroup的实例。</p>
+<p>像之前的架构，<strong>View Layer</strong>持有标准的Framework组件，如ViewGroup，Fragment或者Activity。最主要的不同在于这些组件不再直接订阅Observable。取而代之的是通过实现MvpView接口，然后提供一些列简洁的方法函数，比如<code>showError( )</code>或者<code>showProgressIndicator( )</code>。这个View组件也负责处理用户交互，如点击事件和调用相应<strong>Presenter</strong>中的正确方法。例如，我有一个按钮用来加载博客列表，Activity将会在点击事件的监听中调用<code>presenter.loadTodayPosts( )</code></p>
+<blockquote>
+<p>如果你想看到一个完整的运用MVP基本架构的工作示例，可以从Github检出我们的<a href="https://github.com/ribot/android-boilerplate" target="_blank" rel="external">Android Boilerplate project</a>。也可以从这里阅读关于它的更多信息<a href="https://github.com/ribot/android-guidelines/blob/master/architecture_guidelines/android_architecture.md" target="_blank" rel="external">Ribot的架构指导</a></p>
+</blockquote>
+<p>为什么这种架构更好？</p>
+<ul>
+<li><p>Activity和Fragment变得非常轻量。他们唯一的职责就是建立/更新UI和处理用户事件。因此，他们变得更容易维护。</p>
+</li>
+<li><p>现在我们通过模拟<strong>View Layer</strong>可以很容易的编写出单元测试。之前这些代码是<strong>View Layer</strong>的一部分，所以我们很难对它进行单元测试。整个架构变得测试友好。</p>
+</li>
+<li><p>如果<strong>DataManager</strong>变得臃肿，我们可以通过转移一些代码到<strong>Presenter</strong>来缓解这个问题。</p>
+</li>
+</ul>
+<p>我们依然存在哪些问题？</p>
+<p>当代码库变得非常庞大和复杂时，单一的DataManager依然是一个问题。虽然我们还没有走到这一步，但这是一个真正值得注意的问题，我们已经意识到了这一点，它可能发生。</p>
+<p>值得一提的是它并不是一个完美的架构。事实上，不要天真的认为这是一个独特且完美的方案，能够解决你所有的问题。Android生态系统将保持快速发展的步伐，我们必须继续探索。不断地阅读和尝试，这样我们才能找到更好的方法来继续构建优秀的Android应用程序。</p>
+<blockquote>
+<p>本文转载自：<a href="http://www.jcodecraeer.com/a/anzhuokaifa/androidkaifa/2015/1214/3772.html" target="_blank" rel="external">【译】Android应用架构</a></p>
+</blockquote>
+]]></content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;Android开发生态圈的节奏非常之快。每周都会有新的工具诞生，类库的更新，博客的发表以及技术探讨。如果你外出度假一个月，当你回来的时候可能已经发布了新版本的Support Library或者Play Services&lt;/p&gt;
+&lt;p&gt;我与&lt;a href=&quot;http://ri
+    
+    </summary>
+    
+      <category term="Dev" scheme="http://blog.waynell.com/categories/Dev/"/>
+    
+    
+      <category term="Android" scheme="http://blog.waynell.com/tags/Android/"/>
+    
+      <category term="架构" scheme="http://blog.waynell.com/tags/%E6%9E%B6%E6%9E%84/"/>
+    
+  </entry>
+  
+  <entry>
+    <title>Android冷启动时间优化</title>
+    <link href="http://blog.waynell.com/2015/11/17/android-cold-start/"/>
+    <id>http://blog.waynell.com/2015/11/17/android-cold-start/</id>
+    <published>2015-11-17T05:56:16.000Z</published>
+    <updated>2016-11-05T23:31:03.000Z</updated>
+    
+    <content type="html"><![CDATA[<p>冷启动时间是指当用户点击你的app那一刻到系统调用Activity.onCreate()之间的时间段。在这个时间段内，WindowManager会先加载app主题样式中的windowBackground做为app的预览元素，然后再真正去加载activity的layout布局</p>
+<h2 id="冷启动时间优化"><a href="#冷启动时间优化" class="headerlink" title="冷启动时间优化"></a>冷启动时间优化</h2><p>知道了Android冷启动时间的原理之后，就可以通过一些小技巧来对冷启动时间进行优化，从而让你app加载变得”快“一些（视觉体验上的快）。我们可制作一个启动Activity的背景样式的.9图片，然后把这个.9图片做为windowBackground。</p>
+<p>这里推荐使用 <a href="https://github.com/DreaminginCodeZH/MaterialColdStart" target="_blank" rel="external">MaterialColdStart</a> 这个库来制作我们.9图片。</p>
+<ul>
+<li><p>首先<code>git clone https://github.com/DreaminginCodeZH/MaterialColdStart</code></p>
+</li>
+<li><p>由于该库中引用了子模块 <a href="https://github.com/DreaminginCodeZH/AndroidSVGScripts" target="_blank" rel="external">AndroidSVGScripts</a>, 所以我们需要把该子模块也update下来，否则无法运行</p>
+</li>
+<li><p>在生成.9图片之前，我们还需要根据自己的项目修改生成.9图片的配置文件，打开<code>colors.conf</code>文件，可以配置statusbar、actionbar、background的颜色等，修改raw-xxx目录下的<code>window_background_statusbar_toolbar_tab.9.shsvg.conf</code>文件可以配置statusbar、actionbar的高度等</p>
+</li>
+<li><p>最后执行<code>./gen-png.sh</code>命令，就可以在gen目录下生成我们所需的.9图片了</p>
+</li>
+</ul>
+<p>图片制作好之后，我们就可以用它做为app冷启动阶段的预览元素，如下设置：</p>
+<ul>
+<li><p>为启动的Activity自定义一个Theme</p>
+<figure class="highlight xml"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div></pre></td><td class="code"><pre><div class="line"><span class="tag">&lt;<span class="name">style</span> <span class="attr">name</span>=<span class="string">"AppTheme.Launcher"</span>&gt;</span><span class="xml"></span></div><div class="line">    <span class="tag">&lt;<span class="name">item</span> <span class="attr">name</span>=<span class="string">"android:windowBackground"</span>&gt;</span>@drawable/window_background_statusbar_toolbar_tab<span class="tag">&lt;/<span class="name">item</span>&gt;</span></div><div class="line"><span class="tag">&lt;/<span class="name">style</span>&gt;</span></div></pre></td></tr></table></figure>
+</li>
+<li><p>将新的Theme应用到设置到<code>AndroidManifest.xml</code>中</p>
+<figure class="highlight xml"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div></pre></td><td class="code"><pre><div class="line"><span class="tag">&lt;<span class="name">activity</span></span></div><div class="line">   	<span class="attr">android:name</span>=<span class="string">".MainActivity"</span></div><div class="line">   	<span class="attr">android:theme</span>=<span class="string">"@style/AppTheme.Launcher"</span>&gt;</div><div class="line">        <span class="tag">&lt;<span class="name">intent-filter</span>&gt;</span></div><div class="line">            <span class="tag">&lt;<span class="name">action</span> <span class="attr">android:name</span>=<span class="string">"android.intent.action.MAIN"</span> /&gt;</span></div><div class="line">            <span class="tag">&lt;<span class="name">category</span> <span class="attr">android:name</span>=<span class="string">"android.intent.category.LAUNCHER"</span> /&gt;</span></div><div class="line">        <span class="tag">&lt;/<span class="name">intent-filter</span>&gt;</span></div><div class="line"><span class="tag">&lt;/<span class="name">activity</span>&gt;</span></div></pre></td></tr></table></figure>
+</li>
+<li><p>由于给MainActivity设置了一个新的Theme，这样做会覆盖原来的Theme，所以在MainActivity中需要设置回原来的Theme</p>
+</li>
+</ul>
+<pre><code class="java"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">MainActivity</span> <span class="keyword">extends</span> <span class="title">AppCompatActivity</span> </span>{
+
+    <span class="meta">@Override</span>
+    <span class="function"><span class="keyword">protected</span> <span class="keyword">void</span> <span class="title">onCreate</span><span class="params">(Bundle savedInstanceState)</span> </span>{
+
+        <span class="comment">// Make sure this line comes before calling super.onCreate().</span>
+        setTheme(R.style.AppTheme);
+
+        <span class="keyword">super</span>.onCreate(savedInstanceState);
+    }
+}
+</code></pre>
+<h2 id="效果预览"><a href="#效果预览" class="headerlink" title="效果预览"></a>效果预览</h2><p>第一张是启用了冷启动优化，第二张是没有启用冷启动优化</p>
+<p><img src="/assets/cold-start.gif" alt="cold start"></p>
+<p><img src="/assets/no-cold-start.gif" alt="cold start"></p>
+<blockquote>
+<p>原创不易，欢迎转载，但还请注明出处：<a href="http://blog.waynell.com">blog.waynell.com</a></p>
+</blockquote>
+]]></content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;冷启动时间是指当用户点击你的app那一刻到系统调用Activity.onCreate()之间的时间段。在这个时间段内，WindowManager会先加载app主题样式中的windowBackground做为app的预览元素，然后再真正去加载activity的layout布局
+    
+    </summary>
+    
+      <category term="Dev" scheme="http://blog.waynell.com/categories/Dev/"/>
+    
+    
+      <category term="Android" scheme="http://blog.waynell.com/tags/Android/"/>
+    
+  </entry>
+  
+  <entry>
+    <title>【转】逃离adapter的地狱－针对多个View type的组合实现方案</title>
+    <link href="http://blog.waynell.com/2015/08/13/adapter-hell-escape/"/>
+    <id>http://blog.waynell.com/2015/08/13/adapter-hell-escape/</id>
+    <published>2015-08-13T13:26:00.000Z</published>
+    <updated>2016-11-05T23:31:03.000Z</updated>
+    
+    <content type="html"><![CDATA[<p>让我来告诉你一个关于乔某人的故事，一个在MyLittleZoo Inc工作的安卓开发者。关于他是如何从为具有多个view type的Adapter创建不同对象中解脱出来，最终成功实现可复用Adapter的。</p>
+<p>曾经有一个叫做乔某某的人，它是一个安卓开发者，为一家名叫MyLittleZoo Inc的初创公司工作。这是一家在网上销售宠物相关东西的公司。乔的工作是创建和维护一个与在线商店功能相同的安卓原生app。因此90%的开发工作都只是用RecyclerView显示一个列表。第一个版本1.0只需要显示一个配料列表，为此乔实现了一个AccessoiresAdapter，但是特别推荐的配料用item_accessory_offer.xml 显示，而普通配料则用item_accessory.xml显示。因此这个Adapter有两种View type。在adapter中，view type可以让你为不容的item渲染不同的xml布局。在内部view type其实只是一个唯一的id，一个整型。因此乔的AccessoiresAdapter大致是这样实现的：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">AccessoiresAdapter</span> <span class="keyword">extends</span> <span class="title">RecyclerView</span>.<span class="title">Adapter</span> </span>&#123;</div><div class="line"> </div><div class="line">  <span class="keyword">final</span> <span class="keyword">int</span> VIEW_TYPE_ACCESSORY = <span class="number">0</span>;</div><div class="line">  <span class="keyword">final</span> <span class="keyword">int</span> VIEW_TYPE_ACCESSORY_SPECIAL_OFFER = <span class="number">1</span>;</div><div class="line"> </div><div class="line">  List&lt;Accessory&gt; items;</div><div class="line"> </div><div class="line">  <span class="meta">@Override</span></div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">int</span> <span class="title">getItemViewType</span><span class="params">(<span class="keyword">int</span> position)</span> </span>&#123;</div><div class="line">     Accessory accessory = items.get(postion);</div><div class="line">     <span class="keyword">if</span> (accessory.hasSpecialOffer())&#123;</div><div class="line">       <span class="keyword">return</span> VIEW_TYPE_ACCESSORY_SPECIAL_OFFER;</div><div class="line">     &#125; <span class="keyword">else</span> &#123;</div><div class="line">       <span class="keyword">return</span> VIEW_TYPE_ACCESSORY;</div><div class="line">     &#125;</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="meta">@Override</span></div><div class="line">  <span class="keyword">public</span> RecyclerView.<span class="function">ViewHolder <span class="title">onCreateViewHolder</span><span class="params">(ViewGroup parent, <span class="keyword">int</span> viewType)</span> </span>&#123;</div><div class="line">    <span class="keyword">if</span> (VIEW_TYPE_ACCESSORY_SPECIAL_OFFER == viewType)&#123;</div><div class="line">      <span class="keyword">return</span> <span class="keyword">new</span> SpecialOfferAccessoryViewHolder(inflater.inflate(R.layout.item_accessory_offer, parent));</div><div class="line">    &#125; <span class="keyword">else</span> &#123;</div><div class="line">      <span class="keyword">return</span> <span class="keyword">new</span> AccessoryViewHolder (inflater.inflate(R.layout.item_accessory)):</div><div class="line">    &#125;</div><div class="line">  &#125;</div><div class="line">  ...</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>MyLittelZoo安卓app1.0发布在了play store上。一切看上去都还好，一直相安无事。</p>
+<p>后来，MyLittelZoo变大了，app也是如此。乔需要实现一个新的启动Activity，这里需要显示不同item：NewsTeaser需要和配料显示在一起，所以他建立了HomeAdapter，因为HomeAdapter需要同时显示配料，所以他决定通过继承AccessoriesAdapter来重用之前的代码：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">HomeAdapter</span> <span class="keyword">extends</span> <span class="title">AccessoriesAdapter</span> </span>&#123;</div><div class="line"> </div><div class="line">  <span class="keyword">final</span> <span class="keyword">int</span> VIEW_TYP_NEWS_TEASER = <span class="number">2</span>;</div><div class="line"> </div><div class="line">  <span class="meta">@Override</span></div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">int</span> <span class="title">getItemViewType</span><span class="params">(<span class="keyword">int</span> position)</span> </span>&#123;</div><div class="line">     <span class="keyword">if</span> (items.get(position) <span class="keyword">instanceof</span> NewsTeaser)&#123;</div><div class="line">       <span class="keyword">return</span> VIEW_TYP_NEWS_TEASER;</div><div class="line">     &#125; <span class="keyword">else</span> &#123;</div><div class="line">       <span class="comment">// accessories and special offers</span></div><div class="line">       <span class="keyword">return</span> <span class="keyword">super</span>.getItemViewType(position);</div><div class="line">     &#125;</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="meta">@Override</span></div><div class="line">  <span class="keyword">public</span> RecyclerView.<span class="function">ViewHolder <span class="title">onCreateViewHolder</span><span class="params">(ViewGroup parent, <span class="keyword">int</span> viewType)</span> </span>&#123;</div><div class="line">    <span class="keyword">if</span> (VIEW_TYP_NEWS_TEASER == viewType)&#123;</div><div class="line">      <span class="keyword">return</span> <span class="keyword">new</span> NewsTeaserItem( inflater.inflate(R.layout.item_news_teaser, parent));</div><div class="line">    &#125; <span class="keyword">else</span> &#123;</div><div class="line">      <span class="comment">// accessories and special offers</span></div><div class="line">      <span class="keyword">return</span> <span class="keyword">super</span>.onCreateViewHolder(parent, viewType);</div><div class="line">    &#125;</div><div class="line">  &#125;</div><div class="line">  ...</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>同时还有一个新的只显示关于宠物食物的小建议的Activity需要实现，因此乔实现了PetFoodTipAdapter：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">PetFoodTipAdapter</span> <span class="keyword">extends</span> <span class="title">RecyclerView</span>.<span class="title">Adapter</span> </span>&#123;</div><div class="line"> </div><div class="line">  <span class="keyword">final</span> <span class="keyword">int</span> VIEW_TYP_FOOD_TIP = <span class="number">0</span>;</div><div class="line"> </div><div class="line">  <span class="meta">@Override</span></div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">int</span> <span class="title">getItemViewType</span><span class="params">(<span class="keyword">int</span> position)</span> </span>&#123;</div><div class="line">     <span class="keyword">return</span> VIEW_TYP_FOOD_TIP;</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="meta">@Override</span></div><div class="line">  <span class="keyword">public</span> RecyclerView.<span class="function">ViewHolder <span class="title">onCreateViewHolder</span><span class="params">(ViewGroup parent, <span class="keyword">int</span> viewType)</span> </span>&#123;</div><div class="line">    <span class="keyword">return</span> <span class="keyword">new</span> PetFoodViewHolder(inflater.inflate(R.layout.item_pet_food, parent))</div><div class="line">  &#125;</div><div class="line">  ...</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>因为他能按时交付，他的项目经理非常高兴。MyLittelZoo 2.0 成功发布在 Play Store上。</p>
+<p>几周之后，产品经理跑来跟乔说，生意的发展不及预期。为了赚钱，gongsi决定和一家大广告公司签订一份协议。这家广告公司可以在MyLittleZoo的安卓app上展示横幅，换句话说：乔的公司把自己的灵魂出卖给了魔鬼。乔的工作是使用别人提供的广告sdk，把广告横幅包含在app中。时间紧迫，公司需要钱（从广告上收益）。app的更新必须尽快发布。因为广告横幅需要和RecyclerView中的其他的item显示在一起，乔决定创建一个名叫AdvertismentAdapter的基类adapter。</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">AdvertismentAdapter</span> <span class="keyword">extends</span> <span class="title">RecyclerView</span>.<span class="title">Adapter</span> </span>&#123;</div><div class="line"> </div><div class="line">  <span class="keyword">final</span> <span class="keyword">int</span> VIEW_TYP_ADVERTISEMENT = <span class="number">0</span>;</div><div class="line"> </div><div class="line">  <span class="meta">@Override</span></div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">int</span> <span class="title">getItemViewType</span><span class="params">(<span class="keyword">int</span> position)</span> </span>&#123;</div><div class="line">     <span class="keyword">return</span> VIEW_TYP_ADVERTISEMENT;</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="meta">@Override</span></div><div class="line">  <span class="keyword">public</span> RecyclerView.<span class="function">ViewHolder <span class="title">onCreateViewHolder</span><span class="params">(ViewGroup parent, <span class="keyword">int</span> viewType)</span> </span>&#123;</div><div class="line">    <span class="keyword">return</span> <span class="keyword">new</span> AdvertismentViewHolder(inflater.inflate(R.layout.item_advertisment, parent))</div><div class="line">  &#125;</div><div class="line">  ...</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>从此，其他的所有adapter都继承自AdvertisementAdapter：</p>
+<ul>
+<li><p>AccessoiresAdapter 继承 AdvertisementAdapter</p>
+</li>
+<li><p>HomeAdapter 继承 AccessoiresAdapter 继承 AdvertisementAdapter</p>
+</li>
+<li><p>PetFoodTipAdapter 继承 AdvertisementAdapter</p>
+</li>
+</ul>
+<p>到处充满广告的3.0 版本发布在了Play Store上。产品经理再次对乔的工作感到满意。</p>
+<p>半年之后，产品经理再次敲响了乔的门，告诉他事情有了变化。MyLittleZoo 安卓app的用户不喜欢3.0版本中那些亮瞎人狗眼的广告横幅，app在play store上受到了大量的差评。访问量大减，公司不再盈利了。但是MyLittleZoo不能简单的从app中撤掉广告，因为他们和“魔鬼”签订了一个相当长的合同，魔鬼这里指的当然是广告公司。</p>
+<p>然后MyLittleZoo市场部有个聪明的家伙，他想到了重启一个app项目，只在一个RecyclerView中显示NewsTeaser和PetFoodTip。没有广告，没有推荐。按计划是为了赢回用户的信任。再一次，产品经理告诉乔app需要在两天之内发布，因为在接下来的周末又一个很大的宠物节，app需要在届时呈现才行。乔认为这是可行的。他已经有了NewsTeaser和PetFoodTip的xml布局，adapter也已经是实现了的。因此乔只需把它们搬到一个library中，在原始的MyLittleZoo app和新的无广告版的advertisement app中共享。</p>
+<p>乔准备开始把东西搬到这个library，这时他意识到了此时面对的混乱境地：你还记得adapter的继承关系吗？</p>
+<ul>
+<li><p>每个adapter都继承自AdvertisementAdapter。但是新的app不需要显示广告。此外，显示横幅的广告sdk实在是太bug了，导致了太多的内存泄漏，经常崩溃。即使没有显示广告，sdk也还是在背后干很多事情。因此在新的app中包含广告sdk时不能接受的。</p>
+</li>
+<li><p>对于同时显示NewsTeaser（HomeAdapter的一部分）和PetFoodTip（PetFoodTipAdapter的一部分），没有可以重用的adapter。乔该怎么办呢？他可以创建一个新的NewsTipAdapter继承自HomeAdapter，然后把PetFoodTip作为一个新的view type添加进去。但是那就意味着对于同一个view type有两个adapter需要维护。</p>
+</li>
+</ul>
+<h2 id="欢迎来到adapter的地狱，乔！"><a href="#欢迎来到adapter的地狱，乔！" class="headerlink" title="欢迎来到adapter的地狱，乔！"></a>欢迎来到adapter的地狱，乔！</h2><p>可怜的娃儿，乔非常沮丧。沮丧过后是担忧。他该如何修复这个问题呢？他该如何修复才能避免一个月之后因为实现新功能（一个心的view type）而再次修复呢？<br>因此乔开始把自己的需求写在了白板上。但是没有想出什么办法。他很悲伤，他想到了自己的孩提时代，那个时候生活是多么轻松。那时候需要担心的唯一事情就是在耍完乐高以后清理自己的房间。乐高？等等！乔有了个聪明的主意：他真正需要的是像堆积乐高房子一样的构建自己的adapter：做好一个地基，然后把真正需要的乐高部件粘在一起。如果你的房子需要窗户，去取一个窗户部件；如果需要屋顶，取一个屋顶部件；如果需要后花园，取一朵花的部件。</p>
+<p>靠，接着他就有了大致的图景：</p>
+<blockquote>
+<p>组合优于继承</p>
+</blockquote>
+<p>在和其他程序员讨论的时候，他不止一次同意“组合优于继承”的观点。在这之前，这对于他来说不过是一句口号而已，而现在他才真正根据这个准则构建出一点东西来。好了，一个空的adapter是地基。ViewType则是可重用的组件（乐高部件）。</p>
+<p>因此乔开始定义可复用的乐高部件比如NewsTeaserAdapterDelegate和PetFoodTipAdapterDelegate：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">NewsTeaserAdapterDelegate</span> </span>&#123;</div><div class="line"> </div><div class="line">  <span class="keyword">private</span> <span class="keyword">int</span> viewType;</div><div class="line"> </div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="title">NewsTeaserAdapterDelegate</span><span class="params">(<span class="keyword">int</span> viewType)</span></span>&#123;</div><div class="line">    <span class="keyword">this</span>.viewType = viewType;</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">int</span> <span class="title">getViewType</span><span class="params">()</span></span>&#123;</div><div class="line">    <span class="keyword">return</span> viewType;</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">boolean</span> <span class="title">isForViewType</span><span class="params">(List items, <span class="keyword">int</span> position)</span> </span>&#123;</div><div class="line">    <span class="keyword">return</span>  items.get(position) <span class="keyword">instanceof</span> NewsTeaser;</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="keyword">public</span> RecyclerView.<span class="function">ViewHolder <span class="title">onCreateViewHolder</span><span class="params">(ViewGroup parent)</span> </span>&#123;</div><div class="line">    <span class="keyword">return</span> <span class="keyword">new</span> NewsTeaserViewHolder(inflater.inflate(R.layout.item_news_teaser, parent, <span class="keyword">false</span>));</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">onBindViewHolder</span><span class="params">(List items, <span class="keyword">int</span> position, RecyclerView.ViewHolder holder)</span> </span>&#123;</div><div class="line">      NewsTeaser teaser = (NewsTeaser) items.get(position);</div><div class="line">      NewsTeaserViewHolder vh = (NewsTeaserViewHolder) vh;</div><div class="line"> </div><div class="line">      vh.title.setText(teaser.getTitle());</div><div class="line">      vh.text.setText(teaser.getText());</div><div class="line">  &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">PetFoodTipAdapterDelegate</span> </span>&#123;</div><div class="line"> </div><div class="line">  <span class="keyword">private</span> <span class="keyword">int</span> viewType;</div><div class="line"> </div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="title">PetFoodTipAdapterDelegate</span><span class="params">(<span class="keyword">int</span> viewType)</span></span>&#123;</div><div class="line">    <span class="keyword">this</span>.viewType = viewType;</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">int</span> <span class="title">getViewType</span><span class="params">()</span></span>&#123;</div><div class="line">    <span class="keyword">return</span> viewType;</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">boolean</span> <span class="title">isForViewType</span><span class="params">(List items, <span class="keyword">int</span> position)</span> </span>&#123;</div><div class="line">    <span class="keyword">return</span>  items.get(position) <span class="keyword">instanceof</span> PetFoodTip;</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="keyword">public</span> RecyclerView.<span class="function">ViewHolder <span class="title">onCreateViewHolder</span><span class="params">(ViewGroup parent)</span> </span>&#123;</div><div class="line">    <span class="keyword">return</span> <span class="keyword">new</span> PetFoodTipViewHolder(inflater.inflate(R.layout.item_pet_food, parent, <span class="keyword">false</span>));</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">onBindViewHolder</span><span class="params">(List items, <span class="keyword">int</span> position, RecyclerView.ViewHolder holder)</span> </span>&#123;</div><div class="line">      PetFoodTip tip = (PetFoodTip) items.get(position);</div><div class="line">      PetFoodTipViewHolder vh = (NewsTeaserViewHolder) vh;</div><div class="line"> </div><div class="line">      vh.image.setImageRes(tip.getImage());</div><div class="line">      vh.text.setText(tip.getText());</div><div class="line">  &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>然后是地基，一个空的adapter，然后把乐高部件放在上面，创建NewsTipAdapter，在新app中使用：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div><div class="line">38</div><div class="line">39</div><div class="line">40</div><div class="line">41</div><div class="line">42</div><div class="line">43</div><div class="line">44</div><div class="line">45</div><div class="line">46</div><div class="line">47</div><div class="line">48</div><div class="line">49</div><div class="line">50</div><div class="line">51</div><div class="line">52</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">NewsTipAdapter</span> <span class="keyword">extends</span> <span class="title">RecyclerView</span>.<span class="title">Adapter</span></span>&#123;</div><div class="line"> </div><div class="line">  <span class="keyword">final</span> <span class="keyword">int</span> VIEW_TYP_NEWS_TEASER = <span class="number">0</span>;</div><div class="line">  <span class="keyword">final</span> <span class="keyword">int</span> VIEW_TYP_FOOD_TIP = <span class="number">1</span>;</div><div class="line"> </div><div class="line">  NewsTeaserAdapterDelegate newsTeaserDelegate;</div><div class="line">  PetFoodTipAdapterDelegate foodTipDelegate;</div><div class="line"> </div><div class="line">  List items;</div><div class="line"> </div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="title">NewsTipAdapter</span><span class="params">()</span></span>&#123;</div><div class="line">    newsTeaserDelegate = <span class="keyword">new</span> NewsTeaserAdapterDelegate(VIEW_TYP_NEWS_TEASER);</div><div class="line">    foodTipDelegate = <span class="keyword">new</span> PetFoodTipAdapterDelegate(VIEW_TYP_FOOD_TIP);</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="meta">@Override</span></div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">int</span> <span class="title">getItemViewType</span><span class="params">(<span class="keyword">int</span> position)</span> </span>&#123;</div><div class="line">     <span class="keyword">if</span> (newsTeaserDelegate.isForViewType(items, position))&#123;</div><div class="line">       <span class="keyword">return</span> newsTeaserDelegate.getViewType();</div><div class="line">     &#125;</div><div class="line">     <span class="keyword">else</span> <span class="keyword">if</span> (foodTipDelegate.isForViewType(items, position))&#123;</div><div class="line">       <span class="keyword">return</span> foodTipDelegate.getViewType();</div><div class="line">     &#125;</div><div class="line"> </div><div class="line">     <span class="keyword">throw</span> <span class="keyword">new</span> IllegalArgumentException(<span class="string">"No delegate found"</span>);</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="meta">@Override</span></div><div class="line">  <span class="keyword">public</span> RecyclerView.<span class="function">ViewHolder <span class="title">onCreateViewHolder</span><span class="params">(ViewGroup parent, <span class="keyword">int</span> viewType)</span> </span>&#123;</div><div class="line"> </div><div class="line">    <span class="keyword">if</span> (newsTeaserDelegate.getViewType() == viewType)&#123;</div><div class="line">      <span class="keyword">return</span> newsTeaserDelegate.onCreateViewHolder(parent);</div><div class="line">    &#125;</div><div class="line">    <span class="keyword">else</span> <span class="keyword">if</span> (foodTipDelegate.getViewType() == viewType)&#123;</div><div class="line">      <span class="keyword">return</span> foodTipDelegate.onCreateViewHolder(parent);</div><div class="line">    &#125;</div><div class="line"> </div><div class="line">    <span class="keyword">throw</span> <span class="keyword">new</span> IllegalArgumentException(<span class="string">"No delegate found"</span>);</div><div class="line">  &#125;</div><div class="line"> </div><div class="line"> </div><div class="line">  <span class="meta">@Override</span></div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">onBindViewHolder</span><span class="params">(VH holder, <span class="keyword">int</span> position)</span></span>&#123;</div><div class="line">    <span class="keyword">int</span> viewType = holder.getViewType();</div><div class="line">    <span class="keyword">if</span> (newsTeaserDelegate.getViewType() == viewType)&#123;</div><div class="line">      newsTeaserDelegate.onBindViewHolder(items, position, holder);</div><div class="line">    &#125;</div><div class="line">    <span class="keyword">else</span> <span class="keyword">if</span> (foodTipDelegate.getViewType == viewType)&#123;</div><div class="line">      foodTipDelegate.onBindViewHolder(items, position, holder);</div><div class="line">    &#125;</div><div class="line">  &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>我猜你应该看明白了。与使用继承不同，乔定为每个view type义了一个delegate。每个delegate负责创建和绑定ViewHolder。就如你看到的，上面的代码片段有许多散乱的代码。乔发现了一个插件式的解决办法：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div><div class="line">38</div><div class="line">39</div></pre></td><td class="code"><pre><div class="line"><span class="comment">/**</span></div><div class="line"> * <span class="doctag">@param</span> &lt;T&gt; the type of adapters data source i.e. List&lt;Accessory&gt;</div><div class="line"> */</div><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">interface</span> <span class="title">AdapterDelegate</span>&lt;<span class="title">T</span>&gt; </span>&#123;</div><div class="line"> </div><div class="line">  <span class="comment">/**</span></div><div class="line">   * Get the view type integer. Must be unique within every Adapter</div><div class="line">   *</div><div class="line">   * <span class="doctag">@return</span> the integer representing the view type</div><div class="line">   */</div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">int</span> <span class="title">getItemViewType</span><span class="params">()</span></span>;</div><div class="line"> </div><div class="line">  <span class="comment">/**</span></div><div class="line">   * Called to determine whether this AdapterDelegate is the responsible for the given data</div><div class="line">   * element.</div><div class="line">   *</div><div class="line">   * <span class="doctag">@param</span> items The data source of the Adapter</div><div class="line">   * <span class="doctag">@param</span> position The position in the datasource</div><div class="line">   * <span class="doctag">@return</span> true, if this item is responsible,  otherwise false</div><div class="line">   */</div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">boolean</span> <span class="title">isForViewType</span><span class="params">(@NonNull T items, <span class="keyword">int</span> position)</span></span>;</div><div class="line"> </div><div class="line">  <span class="comment">/**</span></div><div class="line">   * Creates the  &#123;<span class="doctag">@link</span> RecyclerView.ViewHolder&#125; for the given data source item</div><div class="line">   *</div><div class="line">   * <span class="doctag">@param</span> parent The ViewGroup parent of the given datasource</div><div class="line">   * <span class="doctag">@return</span> The new instantiated &#123;<span class="doctag">@link</span> RecyclerView.ViewHolder&#125;</div><div class="line">   */</div><div class="line">  <span class="meta">@NonNull</span> <span class="keyword">public</span> RecyclerView.<span class="function">ViewHolder <span class="title">onCreateViewHolder</span><span class="params">(ViewGroup parent)</span></span>;</div><div class="line"> </div><div class="line">  <span class="comment">/**</span></div><div class="line">   * Called to bind the &#123;<span class="doctag">@link</span> RecyclerView.ViewHolder&#125; to the item of the datas source set</div><div class="line">   *</div><div class="line">   * <span class="doctag">@param</span> items The data source</div><div class="line">   * <span class="doctag">@param</span> position The position in the datasource</div><div class="line">   * <span class="doctag">@param</span> holder The &#123;<span class="doctag">@link</span> RecyclerView.ViewHolder&#125; to bind</div><div class="line">   */</div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">onBindViewHolder</span><span class="params">(@NonNull T items, <span class="keyword">int</span> position, @NonNull RecyclerView.ViewHolder holder)</span></span>;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">AdapterDelegatesManager</span>&lt;<span class="title">T</span>&gt; </span>&#123;</div><div class="line"> </div><div class="line">  <span class="function"><span class="keyword">public</span> AdapterDelegatesManager&lt;T&gt; <span class="title">addDelegate</span><span class="params">(@NonNull AdapterDelegate&lt;T&gt; delegate)</span> </span>&#123;</div><div class="line">    ...</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">int</span> <span class="title">getItemViewType</span><span class="params">(@NonNull T items, <span class="keyword">int</span> position)</span> </span>&#123;</div><div class="line">    ...</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="keyword">public</span> RecyclerView.<span class="function">ViewHolder <span class="title">onCreateViewHolder</span><span class="params">(ViewGroup parent, <span class="keyword">int</span> viewType)</span> </span>&#123;</div><div class="line">    ...</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">onBindViewHolder</span><span class="params">(@NonNull T items, <span class="keyword">int</span> position, @NonNull RecyclerView.ViewHolder viewHolder)</span> </span>&#123;</div><div class="line">    ...</div><div class="line">  &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>这个办法就是把AdapterDelegate注册到一个AdapterDelegatesManager。AdapterDelegatesManager内部有决定不同view type采取何种AdapterDelegate的逻辑与调用相应的delegate方法。应用到NewsTipAdapter中的代码大致如下：</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">NewsTipAdapter</span> <span class="keyword">extends</span> <span class="title">RecyclerView</span>.<span class="title">Adapter</span></span>&#123;</div><div class="line"> </div><div class="line">  <span class="keyword">final</span> <span class="keyword">int</span> VIEW_TYP_NEWS_TEASER = <span class="number">0</span>;</div><div class="line">  <span class="keyword">final</span> <span class="keyword">int</span> VIEW_TYP_FOOD_TIP = <span class="number">1</span>;</div><div class="line"> </div><div class="line">  List items;</div><div class="line"> </div><div class="line">  AdapterDelegatesManager delegates = <span class="keyword">new</span> AdapterDelegatesManager();</div><div class="line"> </div><div class="line">  <span class="function"><span class="keyword">public</span> <span class="title">NewsTipAdapter</span><span class="params">()</span></span>&#123;</div><div class="line">    delegates.add(<span class="keyword">new</span> NewsTeaserAdapterDelegate(VIEW_TYP_NEWS_TEASER));</div><div class="line">    delegates.add(<span class="keyword">new</span> PetFoodTipAdapterDelegate(VIEW_TYP_FOOD_TIP));</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="meta">@Override</span> <span class="function"><span class="keyword">public</span> <span class="keyword">int</span> <span class="title">getItemViewType</span><span class="params">(<span class="keyword">int</span> position)</span> </span>&#123;</div><div class="line">     <span class="keyword">return</span> delegates.getItemViewType(items, position);</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="meta">@Override</span> <span class="keyword">public</span> RecyclerView.<span class="function">ViewHolder <span class="title">onCreateViewHolder</span><span class="params">(ViewGroup parent, <span class="keyword">int</span> viewType)</span> </span>&#123;</div><div class="line">    <span class="keyword">return</span> delegates.onCreateViewHolder(parent, viewType);</div><div class="line">  &#125;</div><div class="line"> </div><div class="line">  <span class="meta">@Override</span> <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">onBindViewHolder</span><span class="params">(VH holder, <span class="keyword">int</span> position)</span></span>&#123;</div><div class="line">      delegates.onBindViewHolder(items, position, holder);</div><div class="line">  &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>我猜你应该能想象MyLittleZoo app其它adapter的样子了。总共有AdvertisementAdapterDelegate, NewsTeaserAdapterDelegate, PetFoodTipAdapterDelegate 和AccessoryAdapterDelegate。从此adapter可以通过那些真正需要的view type（AdapterDelegate）来组合。另外一个好处是你将inflating布局，创建view holder，绑定view holder的过程从adapter中分离出来，成了单独的，模块化的，可复用的AdapterDelegate。你有注意到现在adapter看起来是多了小巧吗？你可分散注意力到扩展性和降低耦合上面来了。另一个附加效果就是更多的团队成员可以在adapter上协同工作，而不用担心复杂的融合问题，因为不是每个人都接触庞大的adapter文件，而是团队成员同时专注于不同的AdapterDelegate 文件。</p>
+<p>乔非常高兴，产品经理也非常高兴，用户也非常高兴，大家都非常高兴。（老外就是哆嗦！）。乔决定把这些AdapterDelegate放在自己的library中，并且开源，真是皆大欢喜。</p>
+<p><a href="https://github.com/sockeqwe/AdapterDelegates" target="_blank" rel="external">你可以在github上找到这些AdapterDelegate</a>，同时也可以在maven central找到。</p>
+<blockquote>
+<p>英文原文：<a href="http://www.jcodecraeer.com/a/anzhuokaifa/androidkaifa/2015/0810/3282.html" target="_blank" rel="external">JOE’S GREAT ADAPTER HELL ESCAPE</a></p>
+<p>本文转载自：<a href="http://www.jcodecraeer.com/a/anzhuokaifa/androidkaifa/2015/0810/3282.html" target="_blank" rel="external">http://www.jcodecraeer.com/a/anzhuokaifa/androidkaifa/2015/0810/3282.html</a></p>
+</blockquote>
+]]></content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;让我来告诉你一个关于乔某人的故事，一个在MyLittleZoo Inc工作的安卓开发者。关于他是如何从为具有多个view type的Adapter创建不同对象中解脱出来，最终成功实现可复用Adapter的。&lt;/p&gt;
+&lt;p&gt;曾经有一个叫做乔某某的人，它是一个安卓开发者，为一家
+    
+    </summary>
+    
+      <category term="Dev" scheme="http://blog.waynell.com/categories/Dev/"/>
+    
+    
+      <category term="Android" scheme="http://blog.waynell.com/tags/Android/"/>
+    
+  </entry>
+  
+  <entry>
+    <title>【翻译】Android的MVP设计模式</title>
+    <link href="http://blog.waynell.com/2015/05/29/mvp-on-android/"/>
+    <id>http://blog.waynell.com/2015/05/29/mvp-on-android/</id>
+    <published>2015-05-29T10:19:14.000Z</published>
+    <updated>2016-11-05T23:31:03.000Z</updated>
+    
+    <content type="html"><![CDATA[<p>随着Android的不断发展，APP的功能越来越强大，UI也越来越复杂，对于Android开发者来说UI层在程序开发过程中担任了越来越多的职责。通常一个APP是由多种数据模型（Model）和多种视图（View）组成，如果我们直接使用Model-View设计模型，那这将使得我们的程序代码变得复杂、耦合度高、不利于单元测试和代码重构。</p>
+<h2 id="什么是MVP设计模式"><a href="#什么是MVP设计模式" class="headerlink" title="什么是MVP设计模式"></a>什么是MVP设计模式</h2><ul>
+<li>View是用户交互层，在Android中它可能是Activity、Fragment、View、Dialog</li>
+<li>Model是数据访问层，例如数据库访问API和远程服务器访问API</li>
+<li>Presenter是View和Model的中间纽带，负责后台数据处理任务和UI层的交互</li>
+</ul>
+<p>在Android的MVP设计模式中，它很好的从activities/views/fragments中分离了后台任务，使得它们独立于自身的生命周期事件。这种设计模式使得程序变得更简单，程序可靠性也极大地增加，程序代码更加短小精悍和易于维护。</p>
+<h2 id="为什么要使用MVP设计模式"><a href="#为什么要使用MVP设计模式" class="headerlink" title="为什么要使用MVP设计模式"></a>为什么要使用MVP设计模式</h2><ol>
+<li><p>Keep It Stupid Simple (让它够蠢够简单，简称Kiss)</p>
+<p> <a href="https://people.apache.org/~fhanik/kiss.html" target="_blank" rel="external">The Kiss Principl</a>是一种设计理念，它能让你编写出更好的代码（建议大家阅读下原文，会受益匪浅）</p>
+<p> 让我们先来看看传统的Model-View设计模式中存在的弊端：</p>
+<p> <img src="/assets/mv.png" alt="mv"></p>
+<p> 从图中可以看出，Model和View完全耦合在一起，或许你觉得并没有那么糟糕，但是不要忘记了，在Android中，Activity和Fragment也是一种View，并且它们是如此复杂，各种生命周期，各种事件传递，各种状态的保存和恢复等待，这都能让你的代码结构变得复杂不堪，而且很难进行重用、重构、单元测试和调试</p>
+<p> 特别是对于Fragment，看似美好，实则痛苦，在之前的工作中遇到不少关于Fragment的奇葩问题，很难找到问题所在，而且Fragment的源码写得十分晦涩，这里有一篇国外开发者写的对Fragment的吐槽文章，有兴趣的可以看看<a href="https://corner.squareup.com/2014/10/advocating-against-android-fragments.html" target="_blank" rel="external">Advocating Against Android Fragments</a>，文中得出这么一个结论 <code>WTFs/min = 2^fragment count</code> (-_-!!!)</p>
+<p> 接下来再看看MVP设计模式：</p>
+<p> <img src="/assets/mvp.png" alt="mvp"></p>
+<p> 它将复杂的任务独立分离成若干个小任务，View不再直接访问数据，全交由Presenter来控制，Presenter访问数据，并控制View的状态，这些都使得程序设计变得更简单，View的逻辑也更加清晰，对单元测试、代码重用等角度来说也是十分有益的</p>
+</li>
+<li><p>后台任务</p>
+<p> 无论何时，在你编写一个Activity、Fragment或者自定义View的时候，都应该将处理后台耗时操作任务的所有方法放到不同的外部类或者静态类中，这样做的好处是能够使得后台任务不会被关联到Activity、Fragment或者View，这样也就不会导致内存泄露。我们就称这类对象为“Presenter”</p>
+</li>
+</ol>
+<h2 id="如何实现MVP"><a href="#如何实现MVP" class="headerlink" title="如何实现MVP"></a>如何实现MVP</h2><p>在实现MVP之前，首先我们应该知道Android程序在设备发生变化或者内存不足时会发生什么，请看下表</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th style="text-align:center">A configuration change</th>
+<th style="text-align:center">An activity restart</th>
+<th style="text-align:center">A process restart</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Dialog</td>
+<td style="text-align:center">reset</td>
+<td style="text-align:center">reset</td>
+<td style="text-align:center">reset</td>
+</tr>
+<tr>
+<td>Activity, View, Fragment</td>
+<td style="text-align:center">save/restore</td>
+<td style="text-align:center">save/restore</td>
+<td style="text-align:center">save/restore</td>
+</tr>
+<tr>
+<td>Fragment with setRetainInstance(true)</td>
+<td style="text-align:center">no change</td>
+<td style="text-align:center">save/restore</td>
+<td style="text-align:center">save/restore</td>
+</tr>
+<tr>
+<td>Static variables and threads</td>
+<td style="text-align:center">no change</td>
+<td style="text-align:center">no change</td>
+<td style="text-align:center">reset</td>
+</tr>
+</tbody>
+</table>
+<p>从表中可以看出：</p>
+<ul>
+<li><p>当设置变化时，例如横竖屏切换，Activity会被销毁并立即被重建，而View、Fragment、Dialog也自然如此，除了Fragment被设置为setRetainInstance(true)状态时不会被销毁重建，不影响静态变量和线程状态</p>
+<blockquote>
+<p>Some device configurations can change during runtime (such as screen orientation, keyboard availability, and language). When such a change occurs, Android recreates the running activity (the system calls onDestroy(), then immediately calls onCreate()).</p>
+</blockquote>
+</li>
+<li><p>当用户开启了“Don’t keep activities”选项或者内存不足时，Activity、Dialog、View、Fragment（包括设置为setRetainInstance(true)状态的）都会被销毁重建，不影响静态变量和线程状态</p>
+</li>
+<li><p>当系统内存不足，且程序不在前台运行时，当再次回到程序时，程序的进程有可能会被重启，这会导致静态变量和线程状态都会被重置</p>
+</li>
+</ul>
+<p>了解了以上规则后，可以得出以下两点结论：</p>
+<ol>
+<li>保存/恢复Activity，View，Fragment等视图的状态</li>
+<li>只有在进程被重启时再重新执行后台数据请求行为，而不是在视图的重启中</li>
+</ol>
+<p>下面来看两个实例，一个是没有使用MVP模式，另外一个是使用了MVP模式</p>
+<ul>
+<li>没有使用MVP模式</li>
+</ul>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div><div class="line">38</div><div class="line">39</div><div class="line">40</div><div class="line">41</div><div class="line">42</div><div class="line">43</div><div class="line">44</div><div class="line">45</div><div class="line">46</div><div class="line">47</div><div class="line">48</div><div class="line">49</div><div class="line">50</div><div class="line">51</div><div class="line">52</div><div class="line">53</div><div class="line">54</div><div class="line">55</div><div class="line">56</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">MainActivity</span> <span class="keyword">extends</span> <span class="title">Activity</span> </span>&#123;</div><div class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> String DEFAULT_NAME = <span class="string">"Chuck Norris"</span>;</div><div class="line"></div><div class="line">    <span class="keyword">private</span> ArrayAdapter&lt;ServerAPI.Item&gt; adapter;</div><div class="line">    <span class="keyword">private</span> Subscription subscription;</div><div class="line"></div><div class="line">    <span class="meta">@Override</span></div><div class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">onCreate</span><span class="params">(Bundle savedInstanceState)</span> </span>&#123;</div><div class="line">        <span class="keyword">super</span>.onCreate(savedInstanceState);</div><div class="line">        setContentView(R.layout.activity_main);</div><div class="line">        ListView listView = (ListView)findViewById(R.id.listView);</div><div class="line">        listView.setAdapter(adapter = <span class="keyword">new</span> ArrayAdapter&lt;&gt;(<span class="keyword">this</span>, R.layout.item));</div><div class="line">        requestItems(DEFAULT_NAME);</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    <span class="meta">@Override</span></div><div class="line">    <span class="function"><span class="keyword">protected</span> <span class="keyword">void</span> <span class="title">onDestroy</span><span class="params">()</span> </span>&#123;</div><div class="line">        <span class="keyword">super</span>.onDestroy();</div><div class="line">        unsubscribe();</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">requestItems</span><span class="params">(String name)</span> </span>&#123;</div><div class="line">        unsubscribe();</div><div class="line">        subscription = App.getServerAPI()</div><div class="line">            .getItems(name.split(<span class="string">"\\s+"</span>)[<span class="number">0</span>], name.split(<span class="string">"\\s+"</span>)[<span class="number">1</span>])</div><div class="line">            .delay(<span class="number">1</span>, TimeUnit.SECONDS)</div><div class="line">            .observeOn(AndroidSchedulers.mainThread())</div><div class="line">            .subscribe(<span class="keyword">new</span> Action1&lt;ServerAPI.Response&gt;() &#123;</div><div class="line">                <span class="meta">@Override</span></div><div class="line">                <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">call</span><span class="params">(ServerAPI.Response response)</span> </span>&#123;</div><div class="line">                    onItemsNext(response.items);</div><div class="line">                &#125;</div><div class="line">            &#125;, <span class="keyword">new</span> Action1&lt;Throwable&gt;() &#123;</div><div class="line">                <span class="meta">@Override</span></div><div class="line">                <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">call</span><span class="params">(Throwable error)</span> </span>&#123;</div><div class="line">                    onItemsError(error);</div><div class="line">                &#125;</div><div class="line">            &#125;);</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">onItemsNext</span><span class="params">(ServerAPI.Item[] items)</span> </span>&#123;</div><div class="line">        adapter.clear();</div><div class="line">        adapter.addAll(items);</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">onItemsError</span><span class="params">(Throwable throwable)</span> </span>&#123;</div><div class="line">        Toast.makeText(<span class="keyword">this</span>, throwable.getMessage(), Toast.LENGTH_LONG).show();</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    <span class="function"><span class="keyword">private</span> <span class="keyword">void</span> <span class="title">unsubscribe</span><span class="params">()</span> </span>&#123;</div><div class="line">        <span class="keyword">if</span> (subscription != <span class="keyword">null</span>) &#123;</div><div class="line">            subscription.unsubscribe();</div><div class="line">            subscription = <span class="keyword">null</span>;</div><div class="line">        &#125;</div><div class="line">    &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>以上示例存在两个明显的问题：</p>
+<ol>
+<li>如当用户每翻转一次手机时，数据请求都被执行一次，这样会造成较差的用户体验和影响程序的性能</li>
+<li>导致内存泄露，因为每一次数据请求时都会注册一个回调的匿名内部类，这样就会导致Activity被hold住从而导致内存泄露</li>
+</ol>
+<ul>
+<li>使用了MVP模式</li>
+</ul>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div><div class="line">38</div><div class="line">39</div><div class="line">40</div><div class="line">41</div><div class="line">42</div><div class="line">43</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">MainPresenter</span> </span>&#123;</div><div class="line"></div><div class="line">    <span class="keyword">public</span> <span class="keyword">static</span> <span class="keyword">final</span> String DEFAULT_NAME = <span class="string">"Chuck Norris"</span>;</div><div class="line"></div><div class="line">    <span class="keyword">private</span> ServerAPI.Item[] items;</div><div class="line">    <span class="keyword">private</span> Throwable error;</div><div class="line"></div><div class="line">    <span class="keyword">private</span> MainActivity view;</div><div class="line"></div><div class="line">    <span class="function"><span class="keyword">public</span> <span class="title">MainPresenter</span><span class="params">()</span> </span>&#123;</div><div class="line">        App.getServerAPI()</div><div class="line">            .getItems(DEFAULT_NAME.split(<span class="string">"\\s+"</span>)[<span class="number">0</span>], DEFAULT_NAME.split(<span class="string">"\\s+"</span>)[<span class="number">1</span>])</div><div class="line">            .delay(<span class="number">1</span>, TimeUnit.SECONDS)</div><div class="line">            .observeOn(AndroidSchedulers.mainThread())</div><div class="line">            .subscribe(<span class="keyword">new</span> Action1&lt;ServerAPI.Response&gt;() &#123;</div><div class="line">                <span class="meta">@Override</span></div><div class="line">                <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">call</span><span class="params">(ServerAPI.Response response)</span> </span>&#123;</div><div class="line">                    items = response.items;</div><div class="line">                    publish();</div><div class="line">                &#125;</div><div class="line">            &#125;, <span class="keyword">new</span> Action1&lt;Throwable&gt;() &#123;</div><div class="line">                <span class="meta">@Override</span></div><div class="line">                <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">call</span><span class="params">(Throwable throwable)</span> </span>&#123;</div><div class="line">                    error = throwable;</div><div class="line">                    publish();</div><div class="line">                &#125;</div><div class="line">            &#125;);</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">onTakeView</span><span class="params">(MainActivity view)</span> </span>&#123;</div><div class="line">        <span class="keyword">this</span>.view = view;</div><div class="line">        publish();</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    <span class="function"><span class="keyword">private</span> <span class="keyword">void</span> <span class="title">publish</span><span class="params">()</span> </span>&#123;</div><div class="line">        <span class="keyword">if</span> (view != <span class="keyword">null</span>) &#123;</div><div class="line">            <span class="keyword">if</span> (items != <span class="keyword">null</span>)</div><div class="line">                view.onItemsNext(items);</div><div class="line">            <span class="keyword">else</span> <span class="keyword">if</span> (error != <span class="keyword">null</span>)</div><div class="line">                view.onItemsError(error);</div><div class="line">        &#125;</div><div class="line">    &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>MainPresenter只在构造函数中执行后台数据请求任务，并通过<code>onTakeView(MainActivity view)</code>函数来注入Activity对象，这样当数据请求任务完成后，就可以使用MainActivity的对象来刷新UI，这样就将数据请求的UI操作封装在一起</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">MainActivity</span> <span class="keyword">extends</span> <span class="title">Activity</span> </span>&#123;</div><div class="line"></div><div class="line">    <span class="keyword">private</span> ArrayAdapter&lt;ServerAPI.Item&gt; adapter;</div><div class="line"></div><div class="line">    <span class="keyword">private</span> <span class="keyword">static</span> MainPresenter presenter;</div><div class="line"></div><div class="line">    <span class="meta">@Override</span></div><div class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">onCreate</span><span class="params">(Bundle savedInstanceState)</span> </span>&#123;</div><div class="line">        <span class="keyword">super</span>.onCreate(savedInstanceState);</div><div class="line">        setContentView(R.layout.activity_main);</div><div class="line"></div><div class="line">        ListView listView = (ListView)findViewById(R.id.listView);</div><div class="line">        listView.setAdapter(adapter = <span class="keyword">new</span> ArrayAdapter&lt;&gt;(<span class="keyword">this</span>, R.layout.item));</div><div class="line"></div><div class="line">        <span class="keyword">if</span> (presenter == <span class="keyword">null</span>)</div><div class="line">            presenter = <span class="keyword">new</span> MainPresenter();</div><div class="line">        presenter.onTakeView(<span class="keyword">this</span>);</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    <span class="meta">@Override</span></div><div class="line">    <span class="function"><span class="keyword">protected</span> <span class="keyword">void</span> <span class="title">onDestroy</span><span class="params">()</span> </span>&#123;</div><div class="line">        <span class="keyword">super</span>.onDestroy();</div><div class="line">        presenter.onTakeView(<span class="keyword">null</span>);</div><div class="line">        <span class="keyword">if</span> (isFinishing())</div><div class="line">            presenter = <span class="keyword">null</span>;</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">onItemsNext</span><span class="params">(ServerAPI.Item[] items)</span> </span>&#123;</div><div class="line">        adapter.clear();</div><div class="line">        adapter.addAll(items);</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">onItemsError</span><span class="params">(Throwable throwable)</span> </span>&#123;</div><div class="line">        Toast.makeText(<span class="keyword">this</span>, throwable.getMessage(), Toast.LENGTH_LONG).show();</div><div class="line">    &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>MainActivity中设置了MainPresenter的静态成员变量<code>presenter</code>，并在<code>onCreate()</code>中当<code>presenter == null</code>时才新创建实例，并在<code>onDestroy()</code>中通过<code>isFinishing()</code>来判断Activity是被用户主动销毁的而不是由于内存不足或者横竖屏切换时，来销毁<code>presenter</code>对象。使用静态成员变量的好处在于程序进程中不会受Activity的影响重复创建MainPresenter对象，而只是在程序进程被重启静态对象被回收时才重新创建。</p>
+<p>从以上两种代码实例可以很清楚看到MVP模式的好处，简洁、高效并且更加符合KISS编程理念。</p>
+<blockquote>
+<p>英文原文出处 <a href="http://konmik.github.io/introduction-to-model-view-presenter-on-android.html" target="_blank" rel="external">Introduction to Model-View-Presenter on Android</a></p>
+</blockquote>
+]]></content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;随着Android的不断发展，APP的功能越来越强大，UI也越来越复杂，对于Android开发者来说UI层在程序开发过程中担任了越来越多的职责。通常一个APP是由多种数据模型（Model）和多种视图（View）组成，如果我们直接使用Model-View设计模型，那这将使得我
+    
+    </summary>
+    
+      <category term="Dev" scheme="http://blog.waynell.com/categories/Dev/"/>
+    
+    
+      <category term="Android" scheme="http://blog.waynell.com/tags/Android/"/>
+    
+  </entry>
+  
+  <entry>
+    <title>Android 5.1触摸事件的传递机制深度剖析(下)</title>
+    <link href="http://blog.waynell.com/2015/05/09/android-touch-02/"/>
+    <id>http://blog.waynell.com/2015/05/09/android-touch-02/</id>
+    <published>2015-05-09T01:55:27.000Z</published>
+    <updated>2016-11-05T23:31:03.000Z</updated>
+    
+    <content type="html"><![CDATA[<p>在上篇文章中，我们分析了Android TouchEvent是如何从底层传递给一个Activity之后，接下来继续分析TouchEvent是如何在Activity中各个View之间进行传递的。</p>
+<h2 id="View和ViewGroup"><a href="#View和ViewGroup" class="headerlink" title="View和ViewGroup"></a>View和ViewGroup</h2><p><em>每一个UI元素都是View的子类，例如TextView，ImageView等</em></p>
+<p><em>每一个Layout布局都是ViewGroup的子类，例如FragmentLayout，LinearLayout，而ViewGroup本身也是View的一个子类，但它是多个View的容器</em></p>
+<p>Android系统中的每个View的子类都具有下面三个和TouchEvent处理密切相关的方法：</p>
+<ul>
+<li><p>public boolean dispatchTouchEvent(MotionEvent ev)</p>
+<p>  这个方法用来向下分发TouchEvent，如果返回true，则表示事件已经被处理，不会再向下分发</p>
+</li>
+<li><p>public boolean onInterceptTouchEvent(MotionEvent ev)</p>
+<p>  这个方法用来在ViewGroup中拦截TouchEvent，View没有这个方法，只在ViewGroup中才有该方法。</p>
+<ul>
+<li>down事件首先会传递到onInterceptTouchEvent()方法</li>
+<li>如果该ViewGroup的onInterceptTouchEvent()在接收到down事件处理完成之后return true，那么后续的move, up等事件将不再传递给onInterceptTouchEvent()，而是和down事件一样传递给该ViewGroup的onTouchEvent()处理，且不会再向下分发事件。</li>
+<li><p>如果该ViewGroup的onInterceptTouchEvent()在接收到down事件处理完成之后return false，那么该事件会向下分发，且后续的move, up等事件还会先传递给该ViewGroup的onInterceptTouchEvent()</p>
+<p>总而言之就是return true拦截事件，不向下分发；return false不拦截事件，向下分发</p>
+</li>
+</ul>
+</li>
+<li><p>public boolean onTouchEvent(MotionEvent ev)</p>
+<p>  这个方法在View的子类中用来处理TouchEvent</p>
+<ul>
+<li>如果最终需要处理事件的view的onTouchEvent()返回了false，那么该事件将被传递至其上一层次的view的onTouchEvent()处理。</li>
+<li>如果最终需要处理事件的view 的onTouchEvent()返回了true，那么后续事件将可以继续传递给该view的onTouchEvent()处理</li>
+</ul>
+</li>
+</ul>
+<p>下面，我们来看一个Demo。如下图，有三个Layout：Out、Middle、Center，Out是最外层的一个Layout</p>
+<p><img src="/assets/layout-2015-05-10-232604.png" alt="Demo1"></p>
+<ul>
+<li>测试1：三个Layout中只有Center是Clickable的，并点击Center，其TouchEvent的传递流程如下图所示</li>
+</ul>
+<p><img src="/assets/image1.png" alt="Demo2"></p>
+<p>首先触摸事件发生时（ACTION_DOWN），由系统调用Activity的dispatchTouchEvent方法，分发该事件。根据触摸事件的坐标，将此事件传递给out的dispatchTouchEvent处理,out则调用onInterceptTouchEvent 判断事件是由自己处理，还是继续分发给子View。此处由于out不处理Touch事件，故根据事件发生坐标，将事件传递给out的直接子View（即middle）。</p>
+<p>Middle及Center中事件处理过程同上。但是由于Center组件是clickable 表示其能处理Touch事件，故center中的onInterceptTouchEvent方法将事件传递给center自己的onTouchEvent方法处理。至此，此Touch事件已被处理，不继续进行传递。</p>
+<p>Move和up事件处理流程类似，但是再center内的dispatchTouchEvent方法内被直接分配给onTouchEvent处理，不需经过onInterceptTouchEvent判断。这是由于，android系统中将1个down事件、n个move事件、1个up事件整体作为一次逻辑上的触控操作，Down事件已经确定了处理事件的对象，则后续的move、up事件也确定了处理事件的对象。</p>
+<ul>
+<li>测试2：三个Layout中都不是Clickable的，其TouchEvent的传递流程如下图所示</li>
+</ul>
+<p><img src="/assets/image2.png" alt="Demo3"></p>
+<p>事件处理流程大致同上，区别是此状态下，所有组件都不会处理事件，事件并不会被center的onTouchEvent方法“消费”，则事件会层层逆向传递，直至回到Activity，若Activity也不对此事件进行处理，此事件相当于消失了（无效果）。</p>
+<p>对于后续的move、up事件，由于第一个down事件已经确定由Activity处理事件，故up事有由Activity的dispatchTouchEvent直接分发给自己的onTouchEvent方法处理。</p>
+<p>注意，Activity的dispatchTouchEvent()和onTouchEvent()是由DecoView实现回调的，而Activity中是没有onInterceptTouchEvent()这个方法的，它被DecoView自己消费掉了。</p>
+<blockquote>
+<p>原创不易，欢迎转载，但还请注明出处：<a href="http://blog.waynell.com">blog.waynell.com</a></p>
+</blockquote>
+]]></content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;在上篇文章中，我们分析了Android TouchEvent是如何从底层传递给一个Activity之后，接下来继续分析TouchEvent是如何在Activity中各个View之间进行传递的。&lt;/p&gt;
+&lt;h2 id=&quot;View和ViewGroup&quot;&gt;&lt;a href=&quot;#Vi
+    
+    </summary>
+    
+      <category term="Dev" scheme="http://blog.waynell.com/categories/Dev/"/>
+    
+    
+      <category term="Android" scheme="http://blog.waynell.com/tags/Android/"/>
+    
+  </entry>
+  
+  <entry>
+    <title>Android 5.1触摸事件的传递机制深度剖析(上)</title>
+    <link href="http://blog.waynell.com/2015/04/20/android-touch-01/"/>
+    <id>http://blog.waynell.com/2015/04/20/android-touch-01/</id>
+    <published>2015-04-20T05:55:27.000Z</published>
+    <updated>2016-11-05T23:31:03.000Z</updated>
+    
+    <content type="html"><![CDATA[<p>在Android的View系统中，TouchEvent消息的传递是非常重要的，只有深入TouchEvent消息的传递机制才能更好的理解一些View组件的原理和编写自定义View控件。本文基于Android 5.1源码进行分析。</p>
+<p>Android系统的消息处理过程，大致可以如下</p>
+<pre><code>触摸消息 ---&gt; 消息处理前端 ---&gt; 窗口管理系统 ---&gt; 应用窗口
+</code></pre><p>当用户通过触摸屏等输入设备产生触摸信息，该消息会首先被消息处理前端转换为更明确的消息，比如DOWN/UP消息。然后通过窗口管理系统（WindowManagerService）根据消息的位置坐标去匹配所有的窗口，判断该坐标的落地窗口的哪个区域中，则把该消息下发给相应的窗口。最后窗口把该消息下发给根View，如果根View没有消费该消息则下发给子View，这样层层传递下去。</p>
+<h2 id="从源码开始分析触摸消息的传递机制"><a href="#从源码开始分析触摸消息的传递机制" class="headerlink" title="从源码开始分析触摸消息的传递机制"></a>从源码开始分析触摸消息的传递机制</h2><blockquote>
+<p>Let’s reading the fucking souce code.</p>
+</blockquote>
+<p>首先从Activity开始分析，看WindowManagerService是如何将消息分发给应用层的。</p>
+<ul>
+<li><p>Activity它有两个关键点</p>
+<ol>
+<li><p><code>Window mWindow</code>成员变量，Window是一个顶级窗口抽象类，它的实现类是<code>PhoneWindow</code>，在Activity的<code>attach()</code>函数中通过<code>mWindow = PolicyManager.makeNewWindow(this)</code>获得，PhoneWindow有一成员变量<code>DecorView mDecor</code></p>
+</li>
+<li><p>实现了<code>Window.Callback</code>接口，它包含了若干事件回调函数，其中就有<code>dispatchTouchEvent(MotionEvent event)</code>函数，并在Activity的<code>attach()</code>函数中通过<code>mWindow.setCallback(this)</code>注册了回调</p>
+</li>
+</ol>
+</li>
+<li><p>DecorView它继承于FrameLayout，它是Activity的顶级Layout，通过<code>setContentView()</code>加入到Activity的View其实都是被加入到该Layout中，它负责了触摸消息的向下分发</p>
+</li>
+<li><p>ViewRootImpl在Android3.0以前叫ViewRoot，它不是一个View，它是用来沟通WindowManagerService，它想wms中注册了消息接收通道（InputChannel）处理来自底层的事件消息。这些都在函数ViewRoot.setView中完成</p>
+</li>
+</ul>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div><div class="line">38</div><div class="line">39</div><div class="line">40</div><div class="line">41</div><div class="line">42</div><div class="line">43</div><div class="line">44</div><div class="line">45</div><div class="line">46</div><div class="line">47</div><div class="line">48</div><div class="line">49</div><div class="line">50</div><div class="line">51</div><div class="line">52</div><div class="line">53</div><div class="line">54</div><div class="line">55</div><div class="line">56</div><div class="line">57</div><div class="line">58</div><div class="line">59</div><div class="line">60</div></pre></td><td class="code"><pre><div class="line"><span class="comment">/**</span></div><div class="line"> * ViewRootImpl.java</div><div class="line"> */</div><div class="line"><span class="keyword">public</span> <span class="keyword">final</span> <span class="class"><span class="keyword">class</span> <span class="title">ViewRootImpl</span> <span class="keyword">implements</span> <span class="title">ViewParent</span>, </span></div><div class="line">	<span class="title">View</span>.<span class="title">AttachInfo</span>.<span class="title">Callbacks</span>, <span class="title">HardwareRenderer</span>.<span class="title">HardwareDrawCallbacks</span> &#123;</div><div class="line">    </div><div class="line">    <span class="comment">/**</span></div><div class="line">     * We have one child</div><div class="line">     */</div><div class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">setView</span> <span class="params">(View view, WindowManager.LayoutParams attrs, View panelParentView)</span></span>&#123;</div><div class="line">    	<span class="comment">// ......</span></div><div class="line">    	mView = view;</div><div class="line">    </div><div class="line">    	<span class="comment">// Schedule the first layout -before- adding to the window manager, to make sure we do the relayout before receiving any other events from the system.</span></div><div class="line">    </div><div class="line">    	requestLayout();</div><div class="line">    	<span class="keyword">if</span> ((mWindowAttributes.inputFeatures &amp; WindowManager.LayoutParams.INPUT_FEATURE_NO_INPUT_CHANNEL) == <span class="number">0</span>) &#123;</div><div class="line">    		mInputChannel = <span class="keyword">new</span> InputChannel();</div><div class="line">    	&#125;</div><div class="line">    	<span class="keyword">try</span> &#123;</div><div class="line">    		mOrigWindowType = mWindowAttributes.type;</div><div class="line">    		mAttachInfo.mRecomputeGlobalAttributes = <span class="keyword">true</span>;</div><div class="line">    		collectViewAttributes();</div><div class="line">    		res = mWindowSession.addToDisplay(mWindow, mSeq, mWindowAttributes,</div><div class="line">    				getHostVisibility(), mDisplay.getDisplayId(),</div><div class="line">    				mAttachInfo.mContentInsets, mInputChannel);</div><div class="line">    	&#125; <span class="keyword">catch</span> (RemoteException e) &#123;</div><div class="line">    		mAdded = <span class="keyword">false</span>;</div><div class="line">    		mView = <span class="keyword">null</span>;</div><div class="line">    		mAttachInfo.mRootView = <span class="keyword">null</span>;</div><div class="line">    		mInputChannel = <span class="keyword">null</span>;</div><div class="line">    		mFallbackEventHandler.setView(<span class="keyword">null</span>);</div><div class="line">    		unscheduleTraversals();</div><div class="line">    		setAccessibilityFocus(<span class="keyword">null</span>, <span class="keyword">null</span>);</div><div class="line">    		<span class="keyword">throw</span> <span class="keyword">new</span> RuntimeException(<span class="string">"Adding window failed"</span>, e);</div><div class="line">    	&#125; <span class="keyword">finally</span> &#123;</div><div class="line">    		<span class="keyword">if</span> (restore) &#123;</div><div class="line">    			attrs.restore();</div><div class="line">    		&#125;</div><div class="line">    	&#125;</div><div class="line">    	<span class="comment">// ......</span></div><div class="line">        <span class="comment">// Set up the input pipeline.</span></div><div class="line">        CharSequence counterSuffix = attrs.getTitle();</div><div class="line">        mSyntheticInputStage = <span class="keyword">new</span> SyntheticInputStage();</div><div class="line">        InputStage viewPostImeStage = <span class="keyword">new</span> ViewPostImeInputStage(mSyntheticInputStage);</div><div class="line">        InputStage nativePostImeStage = <span class="keyword">new</span> NativePostImeInputStage(viewPostImeStage,</div><div class="line">                <span class="string">"aq:native-post-ime:"</span> + counterSuffix);</div><div class="line">        InputStage earlyPostImeStage = <span class="keyword">new</span> EarlyPostImeInputStage(nativePostImeStage);</div><div class="line">        InputStage imeStage = <span class="keyword">new</span> ImeInputStage(earlyPostImeStage,</div><div class="line">                <span class="string">"aq:ime:"</span> + counterSuffix);</div><div class="line">        InputStage viewPreImeStage = <span class="keyword">new</span> ViewPreImeInputStage(imeStage);</div><div class="line">        InputStage nativePreImeStage = <span class="keyword">new</span> NativePreImeInputStage(viewPreImeStage,</div><div class="line">                <span class="string">"aq:native-pre-ime:"</span> + counterSuffix);</div><div class="line">        </div><div class="line">        mFirstInputStage = nativePreImeStage;</div><div class="line">        mFirstPostImeInputStage = earlyPostImeStage;</div><div class="line">        mPendingInputEventQueueLengthCounterName = <span class="string">"aq:pending:"</span> + counterSuffix;</div><div class="line">    &#125;</div><div class="line">  &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p><code>setView()</code>方法首先将对<code>mView</code>赋值，然后调用<code>requestLayout()</code>函数来通知InputManager，这个Activity窗口是当前被激活的窗口，最后当窗口属性没有<code>INPUT_FEATURE_NO_INPUT_CHANNEL</code>标志时创建<code>mInputChannel</code>并通过<code>mWindowSession.addToDisplay()</code>函数注册通道。</p>
+<p>在RootViewImpl中的函数通道是各种策略（InputStage）的组合，各策略负责的任务不同，如SyntheticInputStage、ViewPostImeInputStage、NativePostImeInputStage等待，这些策略以链表结构结构起来，当一个策略者没有消费事件时，就传递个下一个策略者。其中触摸事件由ViewPostImeInputStage处理。</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">final</span> <span class="class"><span class="keyword">class</span> <span class="title">ViewPostImeInputStage</span> <span class="keyword">extends</span> <span class="title">InputStage</span> </span>&#123;</div><div class="line">    <span class="comment">//......</span></div><div class="line">    <span class="meta">@Override</span></div><div class="line">    <span class="function"><span class="keyword">protected</span> <span class="keyword">int</span> <span class="title">onProcess</span><span class="params">(QueuedInputEvent q)</span> </span>&#123;</div><div class="line">        <span class="keyword">if</span> (q.mEvent <span class="keyword">instanceof</span> KeyEvent) &#123;</div><div class="line">            <span class="keyword">return</span> processKeyEvent(q);</div><div class="line">        &#125; <span class="keyword">else</span> &#123;</div><div class="line">            <span class="comment">// If delivering a new non-key event, make sure the window is</span></div><div class="line">            <span class="comment">// now allowed to start updating.</span></div><div class="line">            handleDispatchDoneAnimating();</div><div class="line">            <span class="keyword">final</span> <span class="keyword">int</span> source = q.mEvent.getSource();</div><div class="line">            <span class="keyword">if</span> ((source &amp; InputDevice.SOURCE_CLASS_POINTER) != <span class="number">0</span>) &#123;</div><div class="line">                <span class="keyword">return</span> processPointerEvent(q);</div><div class="line">            &#125; <span class="keyword">else</span> <span class="keyword">if</span> ((source &amp; InputDevice.SOURCE_CLASS_TRACKBALL) != <span class="number">0</span>) &#123;</div><div class="line">                <span class="keyword">return</span> processTrackballEvent(q);</div><div class="line">            &#125; <span class="keyword">else</span> &#123;</div><div class="line">                <span class="keyword">return</span> processGenericMotionEvent(q);</div><div class="line">            &#125;</div><div class="line">        &#125;</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    <span class="comment">//......</span></div><div class="line"></div><div class="line">    <span class="function"><span class="keyword">private</span> <span class="keyword">int</span> <span class="title">processPointerEvent</span><span class="params">(QueuedInputEvent q)</span> </span>&#123;</div><div class="line">        <span class="keyword">final</span> MotionEvent event = (MotionEvent)q.mEvent;</div><div class="line">    </div><div class="line">        mAttachInfo.mUnbufferedDispatchRequested = <span class="keyword">false</span>;</div><div class="line">        <span class="keyword">boolean</span> handled = mView.dispatchPointerEvent(event);</div><div class="line">        <span class="keyword">if</span> (mAttachInfo.mUnbufferedDispatchRequested &amp;&amp; !mUnbufferedInputDispatch) &#123;</div><div class="line">            mUnbufferedInputDispatch = <span class="keyword">true</span>;</div><div class="line">            <span class="keyword">if</span> (mConsumeBatchedInputScheduled) &#123;</div><div class="line">                scheduleConsumeBatchedInputImmediately();</div><div class="line">            &#125;</div><div class="line">        &#125;</div><div class="line">        <span class="keyword">return</span> handled ? FINISH_HANDLED : FORWARD;</div><div class="line">    &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>在<code>onProcess()</code>函数中如果事件不是按键事件且是触摸点事件则调用<code>processPointerEvent()</code>函数，在该函数中调用<code>mView.dispatchPointerEvent()</code>函数来下发该事件</p>
+<p>DecorView是PhontWindow的内部类，在DecorView的<code>dispatchTouchEvent()</code>的函数实现中可以看到它直接调用了callback的回调函数，而这个函数的实现就是Activity了</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">PhoneWindow</span> <span class="keyword">extends</span> <span class="title">Window</span> <span class="keyword">implements</span> <span class="title">MenuBuilder</span>.<span class="title">Callback</span> </span>&#123;</div><div class="line"></div><div class="line">    <span class="comment">/**</span></div><div class="line">     * Set the Callback interface for this window, used to intercept key</div><div class="line">     * events and other dynamic operations in the window.</div><div class="line">     *</div><div class="line">     * <span class="doctag">@param</span> callback The desired Callback interface.</div><div class="line">     */</div><div class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">setCallback</span><span class="params">(Callback callback)</span> </span>&#123;</div><div class="line">        mCallback = callback;</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    <span class="comment">/**</span></div><div class="line">     * Return the current Callback interface for this window.</div><div class="line">     */</div><div class="line">    <span class="function"><span class="keyword">public</span> <span class="keyword">final</span> Callback <span class="title">getCallback</span><span class="params">()</span> </span>&#123;</div><div class="line">        <span class="keyword">return</span> mCallback;</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    <span class="keyword">private</span> <span class="keyword">final</span> <span class="class"><span class="keyword">class</span> <span class="title">DecorView</span> <span class="keyword">extends</span> <span class="title">FrameLayout</span> <span class="keyword">implements</span> <span class="title">RootViewSurfaceTaker</span> </span>&#123;</div><div class="line">        <span class="comment">// ......</span></div><div class="line">        <span class="meta">@Override</span></div><div class="line">        <span class="function"><span class="keyword">public</span> <span class="keyword">boolean</span> <span class="title">dispatchTouchEvent</span><span class="params">(MotionEvent ev)</span> </span>&#123;</div><div class="line">            <span class="keyword">final</span> Callback cb = getCallback();</div><div class="line">            <span class="keyword">return</span> cb != <span class="keyword">null</span> &amp;&amp; !isDestroyed() &amp;&amp; mFeatureId &lt; <span class="number">0</span> ? cb.dispatchTouchEvent(ev)</div><div class="line">                    : <span class="keyword">super</span>.dispatchTouchEvent(ev);</div><div class="line">        &#125;</div><div class="line">    &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>通过对RootViewImpl的分析，我们知道了触摸事件的下发关键在与mView这个对象，那mView这个对象是在何时被赋值的呢？</p>
+<p>它在ActivityThread.handleResumeActivity()函数中被赋值的，首先获得Window对象<code>r.window = r.activity.getWindow()</code>，然后再通过该Windowd对象的<code>r.window.getDecorView()</code>函数 获得顶级View，最后通过WindowManager的实例对象的<code>wm.addView(decor, l)</code>函数将View添加到窗口中</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div></pre></td><td class="code"><pre><div class="line"><span class="comment">/**</span></div><div class="line"> * ActivityThread.java</div><div class="line"> */</div><div class="line"><span class="keyword">public</span> <span class="keyword">final</span> <span class="class"><span class="keyword">class</span> <span class="title">ActivityThread</span> </span>&#123;</div><div class="line">    <span class="function"><span class="keyword">final</span> <span class="keyword">void</span> <span class="title">handleResumeActivity</span><span class="params">(IBinder token,</span></span></div><div class="line">          <span class="keyword">boolean</span> clearHide, <span class="keyword">boolean</span> isForward, <span class="keyword">boolean</span> reallyResume) &#123;</div><div class="line">            <span class="comment">// ......</span></div><div class="line">            <span class="keyword">if</span> (r.window == <span class="keyword">null</span> &amp;&amp; !a.mFinished &amp;&amp; willBeVisible) &#123;</div><div class="line">                r.window = r.activity.getWindow();</div><div class="line">                View decor = r.window.getDecorView();</div><div class="line">                decor.setVisibility(View.INVISIBLE);</div><div class="line">                ViewManager wm = a.getWindowManager();</div><div class="line">                WindowManager.LayoutParams l = r.window.getAttributes();</div><div class="line">                a.mDecor = decor;</div><div class="line">                l.type = WindowManager.LayoutParams.TYPE_BASE_APPLICATION;</div><div class="line">                l.softInputMode |= forwardBit;</div><div class="line">                <span class="keyword">if</span> (a.mVisibleFromClient) &#123;</div><div class="line">                    a.mWindowAdded = <span class="keyword">true</span>;</div><div class="line">                    wm.addView(decor, l);</div><div class="line">                &#125;</div><div class="line">    	    	<span class="comment">// ......</span></div><div class="line">    	    &#125;</div><div class="line">    &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>再来看WindowManager实例中的<code>addView()</code>函数，它直接调用了WindowManagerGlobal的addView()函数，从这能看出，WindowManagerGlobal才真正是WindowManager的实现类，WindowManagerImpl只不过代理了一下</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div></pre></td><td class="code"><pre><div class="line"><span class="comment">/**</span></div><div class="line"> * WindowManagerImpl.java</div><div class="line"> */</div><div class="line"><span class="keyword">public</span> <span class="keyword">final</span> <span class="class"><span class="keyword">class</span> <span class="title">WindowManagerImpl</span> <span class="keyword">implements</span> <span class="title">WindowManager</span> </span>&#123;</div><div class="line">	<span class="keyword">private</span> <span class="keyword">final</span> WindowManagerGlobal mGlobal =  WindowManagerGlobal.getInstance();</div><div class="line">	<span class="comment">//......</span></div><div class="line">	<span class="meta">@Override</span></div><div class="line">	<span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">addView</span><span class="params">(View view, ViewGroup.LayoutParams params)</span> </span>&#123;</div><div class="line">		mGlobal.addView(view, params, mDisplay, mParentWindow);</div><div class="line">	&#125;</div><div class="line">	<span class="comment">//......</span></div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>最后，WindowManagerGlobal的<code>addView()</code>函数中直接new了一个ViewRootImpl对象，然后在这个对象上直接调用了ViewRootImpl的<code>setView()</code>函数，就这样把Activity的顶级View赋值给了它的成员变量</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div></pre></td><td class="code"><pre><div class="line"><span class="comment">/**</span></div><div class="line"> * WindowManagerGlobal.java</div><div class="line"> */</div><div class="line"><span class="keyword">public</span> <span class="keyword">final</span> <span class="class"><span class="keyword">class</span> <span class="title">WindowManagerGlobal</span> </span>&#123;</div><div class="line">	<span class="comment">//......</span></div><div class="line">	<span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">addView</span><span class="params">(View view, ViewGroup.LayoutParams params, </span></span></div><div class="line">	    Display display, Window parentWindow) &#123;</div><div class="line">	    </div><div class="line">	    ViewRootImpl root;</div><div class="line">	    View panelParentView = <span class="keyword">null</span>;</div><div class="line">	</div><div class="line">	    <span class="comment">// ......</span></div><div class="line">	</div><div class="line">	    root = <span class="keyword">new</span> ViewRootImpl(view.getContext(), display);</div><div class="line">	</div><div class="line">	    <span class="comment">// do this last because it fires off messages to start doing things</span></div><div class="line">	    <span class="keyword">try</span> &#123;</div><div class="line">	        root.setView(view, wparams, panelParentView);</div><div class="line">	    &#125; <span class="keyword">catch</span> (RuntimeException e) &#123;</div><div class="line">	        <span class="comment">// BadTokenException or InvalidDisplayException, clean up.</span></div><div class="line">	        <span class="keyword">synchronized</span> (mLock) &#123;</div><div class="line">	            <span class="keyword">final</span> <span class="keyword">int</span> index = findViewLocked(view, <span class="keyword">false</span>);</div><div class="line">	            <span class="keyword">if</span> (index &gt;= <span class="number">0</span>) &#123;</div><div class="line">	                removeViewLocked(index, <span class="keyword">true</span>);</div><div class="line">	            &#125;</div><div class="line">	        &#125;</div><div class="line">	        <span class="keyword">throw</span> e;</div><div class="line">	    &#125;</div><div class="line">	&#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>至此，已经完全分析了Activity是怎么通过ViewRootImpl这个对象来接收底层的事件消息，下一节中，我会对从Activity出发，进一步分析事件的传递机制。</p>
+<p>本人才疏学浅，有分析错误的地方，还请大家纠正。另外，本文中，有些逻辑分析是来自老罗的blog，非常感谢老罗，他写的Android文章十分有用，大家也不妨去看看。</p>
+<p><a href="http://blog.csdn.net/luoshengyang/article/details/6882903" target="_blank" rel="external">Android应用程序键盘（Keyboard）消息处理机制分析</a></p>
+<p><a href="http://blog.csdn.net/yangwen123/article/details/35987609" target="_blank" rel="external">Android应用程序窗口设计框架介绍</a></p>
+<blockquote>
+<p>原创不易，欢迎转载，但还请注明出处：<a href="http://blog.waynell.com">blog.waynell.com</a></p>
+</blockquote>
+]]></content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;在Android的View系统中，TouchEvent消息的传递是非常重要的，只有深入TouchEvent消息的传递机制才能更好的理解一些View组件的原理和编写自定义View控件。本文基于Android 5.1源码进行分析。&lt;/p&gt;
+&lt;p&gt;Android系统的消息处理过程
+    
+    </summary>
+    
+      <category term="Dev" scheme="http://blog.waynell.com/categories/Dev/"/>
+    
+    
+      <category term="Android" scheme="http://blog.waynell.com/tags/Android/"/>
+    
+  </entry>
+  
+  <entry>
+    <title>Android Multidex原理以及NoClassDefFoundError的解决方法</title>
+    <link href="http://blog.waynell.com/2015/04/19/android-multidex/"/>
+    <id>http://blog.waynell.com/2015/04/19/android-multidex/</id>
+    <published>2015-04-19T08:51:04.000Z</published>
+    <updated>2016-11-05T23:31:03.000Z</updated>
+    
+    <content type="html"><![CDATA[<p>Android在5.0以前一个APK的方法数大小不能超过65536，否则就无法被编译。这个问题一直在Android 5.0的推出前都没有一个官方的解决方案，随着5.0的推出，Android也放出了<a href="http://developer.android.com/tools/building/multidex.html" target="_blank" rel="external">Multidex Support Library</a>来解决这个问题。</p>
+<p>这里不讨论如何使用Multidex，官方文档里面写得非常清楚，主要来说下Multidex的实现方法，它是怎么样将class编译进不同的dex文件中的。</p>
+<h2 id="Multidex的实现原理"><a href="#Multidex的实现原理" class="headerlink" title="Multidex的实现原理"></a>Multidex的实现原理</h2><p>Multidex的实现原理是将class编译进不同的classes.dex文件中，一般情况下，一个APK文件中只包含了一个classes.dex文件。分包之后就存在一个主的classes.dex，多个副的classes2.dex，classes3.dex…</p>
+<p>在要启动程序时，Android会先去加载主的classes.dex，然后在程序启动后再去加载其它副的dex。那哪些class应该被编译到主的classes.dex中呢？</p>
+<p>先来看下Multidex的编译过程，它由三个不同的gradle task组成（不知道什么是Gradle Task的可以去看下我前面写的博客<a href="http://blog.waynell.com/2015/04/08/gradle-use-02/">Gradle的基本使用(二)</a>）:<br><figure class="highlight groovy"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">collect&#123;variant&#125;MultiDexComponents task</div></pre></td></tr></table></figure></p>
+<p>这个task会读取项目的AndroidManifest.xml文件中注册的application、Activity、service、receiver、provider、instrumentation相关类，并将其class文件路径写到文件<code>buidl/intermediates/multi-dex/${variant.dirName}/manifest_keep.txt</code>中<br><figure class="highlight groovy"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">shrink&#123;variant&#125;MultiDexComponents task</div></pre></td></tr></table></figure></p>
+<p>这个task会调用ProGuard并根据上一步生成的manifest_keep.txt文件内容去压缩class，剔除没有用到的class，生成一个精简的jar包<code>buidl/intermediates/multi-dex/${variant.dirName}/componentClasses.jar</code><br><figure class="highlight groovy"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">create&#123;variant&#125;MainDexClassList task</div></pre></td></tr></table></figure></p>
+<p>这个task会根据上一步生成的componentClasses.jar去寻找这里面的各个class文字中依赖的class，比如一个class中有一成员变量X，那么X就是依赖的class，componentClasses.jar中所有的class和依赖的class路径都会被写入到文件<code>buidl/intermediates/multi-dex/${variant.dirName}/maindexlist.txt</code>中，这个文件中的类都会被编译进主的classes.dex中去。（详情可以查看<a href="https://android.googlesource.com/platform/dalvik/+/master/dx/src/com/android/multidex/ClassReferenceListBuilder.java" target="_blank" rel="external">ClassReferenceListBuilder的实现源码</a>）</p>
+<h2 id="NoClassDefFoundError"><a href="#NoClassDefFoundError" class="headerlink" title="NoClassDefFoundError"></a>NoClassDefFoundError</h2><p>Multidex固然是好的，不用再为方法数超过65536而苦恼了。但是有时往往会带来意想不到的bug，比如NoClassDefFoundError。之前我就在项目中遇到了这个问题，一启动程序就crash了，看log是由于某个类找不到引起的。</p>
+<p>通过上面的分析，我们已经得知Multidex的原理了，所以要解决一启动程序就NoClassDefFoundError的问题只需要确定该类是否正确被编译到主classes.dex中去了，如果没有被编进去的话，只要修改下maindexlist.txt文件，把这个类添加进去即可。由于maindexlist.txt这个文件是每次编译时自动生成的，手动去修改它是没用的，所以我们可以在gradle编译中新加入一个task，在<code>create{variant}MainDexClassList</code>这个task完成之后再去修改maindexlist.txt文件添加丢失的class</p>
+<blockquote>
+<p>原创不易，欢迎转载，但还请注明出处：<a href="http://blog.waynell.com">blog.waynell.com</a></p>
+</blockquote>
+]]></content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;Android在5.0以前一个APK的方法数大小不能超过65536，否则就无法被编译。这个问题一直在Android 5.0的推出前都没有一个官方的解决方案，随着5.0的推出，Android也放出了&lt;a href=&quot;http://developer.android.com/t
+    
+    </summary>
+    
+      <category term="Dev" scheme="http://blog.waynell.com/categories/Dev/"/>
+    
+    
+      <category term="Android" scheme="http://blog.waynell.com/tags/Android/"/>
+    
+  </entry>
+  
+  <entry>
+    <title>Gradle的基本使用（三）</title>
+    <link href="http://blog.waynell.com/2015/04/13/gradle-use-03/"/>
+    <id>http://blog.waynell.com/2015/04/13/gradle-use-03/</id>
+    <published>2015-04-13T06:27:35.000Z</published>
+    <updated>2016-11-05T23:31:03.000Z</updated>
+    
+    <content type="html"><![CDATA[<p>Gradle的设计理念是，所有有用的特性都由Gradle插件提供，例如编写一个Java项目时，需要使用到 Java 插件， 它会将许多任务自动的加入到你项目里。Gradle本身提供了一系列的标准插件，无需多余配置只需要在你的build.gradle文件中加入 <code>apply plugin: &#39;java&#39;</code></p>
+<h2 id="Gradle插件"><a href="#Gradle插件" class="headerlink" title="Gradle插件"></a>Gradle插件</h2><p>这样就可以引入许多task，只需要使用相应的task命令就可以进行项目构建。例如下列一些task:</p>
+<ol>
+<li>gradle build：编译整个项目，它会执行代码编译、代码检测和单元测试等</li>
+<li>gradle assemble：编译并打包你的代码, 但是并不运行代码检测和单元测试</li>
+<li>gradle clean：删除 build 生成的目录和所有生成的文件</li>
+<li>gradle check：编译并测试你的代码。其它的插件会加入更多的检查步骤，如使用 checkstyle、pmd、findbugs</li>
+</ol>
+<p>Gradle各个task的关系图：<br><img src="/assets/pic2.png" alt="tasks"></p>
+<p>从上图可以看出，我们通常在执行一个build命令时其实是将一些零散的命令批量执行了，我们也可以根据自己的需求执行其中某一个命令。</p>
+<h2 id="外部依赖"><a href="#外部依赖" class="headerlink" title="外部依赖"></a>外部依赖</h2><p>通常, 一个 Java 项目将有许多外部的依赖, 既指向外部的 JAR 文件. 为了在项目里引用这些 JAR 文件, 你需要告诉 Gradle 去哪里找它们. 在 Gradle 中, JAR 文件位于一个仓库中，这里的仓库类似于 maven 的仓库。</p>
+<p>首先，指定maven的仓库地址：<br><figure class="highlight dts"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div></pre></td><td class="code"><pre><div class="line"><span class="class">repositories </span>&#123;</div><div class="line">	mavenCentral()</div><div class="line">&#125;</div></pre></td></tr></table></figure></p>
+<p><code>mavenCentral()</code> 是Gradle内置的一个maven仓库地址，加入maven仓库后，就可以直接加入maven仓库中的外部依赖，如果这个外部依赖不存在，gradle会联网去maven仓库中自动下载它，并将它缓存到本地，下次再使用时会优先从本地缓存中查找该依赖。<br><figure class="highlight gradle"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">dependencies</span> &#123;</div><div class="line">	<span class="keyword">compile</span> <span class="keyword">group</span>: <span class="string">'commons-collections'</span>, name: <span class="string">'commons-collections'</span>, version: <span class="string">'3.2'</span></div><div class="line">	<span class="comment">// 简化写法</span></div><div class="line">	<span class="comment">// compile 'commons-collections:commons-collections:3.2'</span></div><div class="line">&#125;</div></pre></td></tr></table></figure></p>
+<p>引用一个外部依赖需要指定使用的group, name 和 version 属性，三者缺一不可。那从哪里得知JAR包的这三个属性呢？我们可以从<a href="http://mvnrepository.com/" target="_blank" rel="external">mvnrepository</a>中搜索到。</p>
+<h2 id="本地依赖"><a href="#本地依赖" class="headerlink" title="本地依赖"></a>本地依赖</h2><p>Gradle也可以从本地目录中引入JAR包依赖，可以单一引入指定的某一JAR包，也可以引入某目录下所有的JAR包<br><figure class="highlight gradle"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">dependencies</span> &#123;</div><div class="line">	<span class="keyword">compile</span> files(<span class="string">'dir/file.jar'</span>)</div><div class="line">	<span class="keyword">compile</span> <span class="keyword">fileTree</span>(dir: <span class="string">'libs'</span>, <span class="keyword">include</span>: <span class="string">'*.jar'</span>)</div><div class="line">&#125;</div></pre></td></tr></table></figure></p>
+<h2 id="项目依赖"><a href="#项目依赖" class="headerlink" title="项目依赖"></a>项目依赖</h2><p>往往一个完整的项目由多个子项目构成。在Gradle中，使用文件settings.gradle定义当前项目的子项目。默认情况下，每个子项目的名称对应着当前操作系统目录下的一个子目录。<br><figure class="highlight sml"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">include</span> <span class="symbol">'sub</span>-project1', <span class="symbol">'sub</span>-project2', <span class="symbol">'sub</span>-project3'</div></pre></td></tr></table></figure></p>
+<p>如sub-project1依赖sub-project2，则在sub-project1的build.gradle中加入以下配置即可：<br><figure class="highlight gradle"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div></pre></td><td class="code"><pre><div class="line"><span class="keyword">dependencies</span> &#123;</div><div class="line">	<span class="keyword">compile</span> <span class="keyword">project</span>(<span class="string">':sub-project2'</span>)</div><div class="line">&#125;</div></pre></td></tr></table></figure></p>
+<h2 id="依赖关系管理"><a href="#依赖关系管理" class="headerlink" title="依赖关系管理"></a>依赖关系管理</h2><p>从宏观上说，依赖关系管理分为两个方面。首先，gradle需要知道你要构建或者运行的项目，以便找到它们。我们将这些导入的文件视为项目的依赖。第二，gradle需要构建或者打包你的项目产品。我们将这些导出的文件视为项目的发布。</p>
+<p>例如在编译源码时项目需要Hibernate的某些jar包被加入到工程中，而在进行单元测试时还另需要Junit的某些jar被加入。这些被引入的jar包就是项目的依赖。Gradle允许对依赖进行相应的配置，通过不同的配置可以形成不同的依赖效果。例如：</p>
+<figure class="highlight groovy"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div></pre></td><td class="code"><pre><div class="line">apply <span class="string">plugin:</span> <span class="string">'java'</span></div><div class="line"></div><div class="line">repositories &#123;</div><div class="line">    mavenCentral()</div><div class="line">&#125;</div><div class="line"></div><div class="line">dependencies &#123;</div><div class="line">    compile <span class="string">group:</span> <span class="string">'org.hibernate'</span>, <span class="string">name:</span> <span class="string">'hibernate-core'</span>, <span class="string">version:</span> <span class="string">'3.6.7.Final'</span></div><div class="line">    testCompile <span class="string">group:</span> <span class="string">'junit'</span>, <span class="string">name:</span> <span class="string">'junit'</span>, <span class="string">version:</span> <span class="string">'4.+'</span></div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>在项目编译时期，junit的jar包不会被引入，只有在单元测试时才会被引入。这样，就可以在不同的场景下加入相应的依赖关系，非常的灵活</p>
+<p>Java 插件中定义了许多标准的配置，例如如下：<br><figure class="highlight groovy"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div></pre></td><td class="code"><pre><div class="line">compile </div><div class="line">	用来编译项目源代码的依赖</div><div class="line">runtime</div><div class="line">	在运行时被生成的类使用的依赖。 默认的, 也包含了compile时的依赖。</div><div class="line">testCompile</div><div class="line">	编译测试代码的依赖。 默认的, 包含runtime时的依赖和compile时的依赖。</div><div class="line">testRuntime</div><div class="line">	运行测试所需要的依赖。 默认的, 包含上面三个依赖。</div></pre></td></tr></table></figure></p>
+<blockquote>
+<p>原创不易，欢迎转载，但还请注明出处：<a href="http://blog.waynell.com">blog.waynell.com</a></p>
+</blockquote>
+]]></content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;Gradle的设计理念是，所有有用的特性都由Gradle插件提供，例如编写一个Java项目时，需要使用到 Java 插件， 它会将许多任务自动的加入到你项目里。Gradle本身提供了一系列的标准插件，无需多余配置只需要在你的build.gradle文件中加入 &lt;code&gt;a
+    
+    </summary>
+    
+      <category term="Dev" scheme="http://blog.waynell.com/categories/Dev/"/>
+    
+    
+      <category term="Gradle" scheme="http://blog.waynell.com/tags/Gradle/"/>
+    
+  </entry>
+  
+  <entry>
+    <title>Gradle的基本使用（二）</title>
+    <link href="http://blog.waynell.com/2015/04/08/gradle-use-02/"/>
+    <id>http://blog.waynell.com/2015/04/08/gradle-use-02/</id>
+    <published>2015-04-08T09:23:25.000Z</published>
+    <updated>2016-11-05T23:31:03.000Z</updated>
+    
+    <content type="html"><![CDATA[<p>任何一个构建系统都是由多个构建文件组成，如Ant是由build.xml组成，Maven是由pom.xml组成，Make是由makefile组成。这些构建脚本定义了一系列的规则来指定项目编译流程。</p>
+<h2 id="Gradle构建系统的组成"><a href="#Gradle构建系统的组成" class="headerlink" title="Gradle构建系统的组成"></a>Gradle构建系统的组成</h2><p>Gradle的构建系统是由以下几个文件组成</p>
+<ul>
+<li><p>build.gradle 我们称这个文件为一个构建脚本，这个脚本定义了一个模块和编译用的tasks，它一般是放在项目的模块中，也可以放在项目的根目录用来作为编译结构全局设置，它是必须的</p>
+</li>
+<li><p>settings.gradle 它描述了哪一个模块需要参与构建。每一个多模块的构建都必须在项目结构的根目录中加入这个设置文件，它也是必须的</p>
+</li>
+<li><p>gradle.properties 用来配置构建属性，这个不是必须的<br>settings.gradle和gradle.properties的用法都十分简单，这里就不再多加说明，后面会给出示例，看示例就能明白其用法，现在主要对build.gradle的进行说明。</p>
+</li>
+</ul>
+<h2 id="Hello-World"><a href="#Hello-World" class="headerlink" title="Hello World"></a>Hello World</h2><p>Gradle是基于Groovy语言的构建系统（这里并不会详细解释Groovy语法的使用，有需要请参考Groovy的官方文档 — <a href="http://groovy-lang.org/single-page-documentation.html" target="_blank" rel="external">Groovy语法</a>），所以在构建脚本中可以使用Groovy语言来执行一些任务。</p>
+<p>下面编写一个简单的build.gradle文件，定义一个task来打印hell world，如下所示：<br><figure class="highlight groovy"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div></pre></td><td class="code"><pre><div class="line">task hello &#123; <span class="comment">//先定义一个hello的task</span></div><div class="line">    doLast &#123; <span class="comment">//实现doLast方法</span></div><div class="line">        println <span class="string">'Hello world!'</span></div><div class="line">    &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure></p>
+<p>然后在终端中运行gradle hello命令来执行这个task,就会看到以下输入内容：<br><figure class="highlight groovy"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div></pre></td><td class="code"><pre><div class="line">&gt; gradle hello</div><div class="line">:hello</div><div class="line">Hello world!</div></pre></td></tr></table></figure></p>
+<p>对于hello这个task，还可以使用更简单的定义方式，如下：<br><figure class="highlight groovy"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div></pre></td><td class="code"><pre><div class="line">task hello &lt;&lt; &#123;</div><div class="line">    println <span class="string">'Hello world!'</span></div><div class="line">&#125;</div></pre></td></tr></table></figure></p>
+<p><code>&lt;&lt;</code> 就等价于 <code>doLast</code>，<code>doLast</code> 是gradle提供访问task任务的一个API，类似的还有 <code>doFirst</code>，当一个task被执行的时候，可以通过 <code>doFirst</code> 和 <code>doLast</code> 向task中动态添加操作。<code>doFirst</code> 和 <code>doLast</code> 会在task本身被执行之后才会被执行。例如：<br><figure class="highlight groovy"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div></pre></td><td class="code"><pre><div class="line">task hello &#123;</div><div class="line">    println <span class="string">'Hello Earth'</span></div><div class="line">&#125;</div><div class="line">hello.doFirst &#123;</div><div class="line">    println <span class="string">'Hello Venus'</span></div><div class="line">&#125;</div><div class="line">hello.doFirst &#123;</div><div class="line">    println <span class="string">'Hello Mercury'</span></div><div class="line">&#125;</div><div class="line">hello.doLast &#123;</div><div class="line">    println <span class="string">'Hello Mars'</span></div><div class="line">&#125;</div><div class="line">hello &lt;&lt; &#123;</div><div class="line">    println <span class="string">'Hello Jupiter'</span></div><div class="line">&#125;</div></pre></td></tr></table></figure></p>
+<p>输入如下所示：<br><figure class="highlight groovy"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div></pre></td><td class="code"><pre><div class="line">Hello Earth</div><div class="line">:hello</div><div class="line">Hello Mercury</div><div class="line">Hello Venus</div><div class="line">Hello Mars</div><div class="line">Hello Jupiter</div></pre></td></tr></table></figure></p>
+<h2 id="Task依赖"><a href="#Task依赖" class="headerlink" title="Task依赖"></a>Task依赖</h2><p>上面示例展示了如何编写一个hello world的task，在Gradle中各个task并不是孤立的，它们可以是相互依赖的。要让一个task依赖另外一个task，只需要在task定义时加入 <code>dependsOn:</code> 说明即可，被依赖的task会优先依赖者被执行，例如：</p>
+<figure class="highlight groovy"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div></pre></td><td class="code"><pre><div class="line">task hello &lt;&lt; &#123;</div><div class="line">    println <span class="string">'Hello world!'</span></div><div class="line">&#125;</div><div class="line">task intro(<span class="string">dependsOn:</span> hello) &lt;&lt; &#123;</div><div class="line">    println <span class="string">"I'm Gradle"</span></div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>运行gradle intro命令后可以看到以下输出：</p>
+<pre><code>&gt; gradle intro
+Hello world!
+I&apos;m Gradle
+</code></pre><blockquote>
+<p>原创不易，欢迎转载，但还请注明出处：<a href="http://blog.waynell.com">blog.waynell.com</a></p>
+</blockquote>
+]]></content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;任何一个构建系统都是由多个构建文件组成，如Ant是由build.xml组成，Maven是由pom.xml组成，Make是由makefile组成。这些构建脚本定义了一系列的规则来指定项目编译流程。&lt;/p&gt;
+&lt;h2 id=&quot;Gradle构建系统的组成&quot;&gt;&lt;a href=&quot;#Gr
+    
+    </summary>
+    
+      <category term="Dev" scheme="http://blog.waynell.com/categories/Dev/"/>
+    
+    
+      <category term="Gradle" scheme="http://blog.waynell.com/tags/Gradle/"/>
+    
+  </entry>
+  
+  <entry>
+    <title>Gradle的基本使用（一）</title>
+    <link href="http://blog.waynell.com/2015/04/03/gradle-use-01/"/>
+    <id>http://blog.waynell.com/2015/04/03/gradle-use-01/</id>
+    <published>2015-04-03T09:51:11.000Z</published>
+    <updated>2016-11-05T23:31:03.000Z</updated>
+    
+    <content type="html"><![CDATA[<p>Gradle是一种依赖管理工具，基于Groovy语言，面向Java应用为主，它抛弃了基于XML的各种繁琐配置，取而代之的是一种基于Groovy的内部领域特定（DSL）语言。它提供灵活的通用构建工具，就像ant。同时完美兼容Maven或Ivy仓库</p>
+<h2 id="Gradle的特点："><a href="#Gradle的特点：" class="headerlink" title="Gradle的特点："></a>Gradle的特点：</h2><ol>
+<li>一个像Ant一样非常灵活的通用构建工具</li>
+<li>一种可切换的，像Maven一样基于约定的构建框架，约定优于配置</li>
+<li>强大的对于多工程构建的支持</li>
+<li>完全支持现有的Maven和lvy仓库</li>
+<li>支持传递性依赖管理，而不需要远程仓库或者是pom.xml和ivy.xml文件</li>
+<li>非常适合构建Ant tasks和build</li>
+<li>支持Groovy构建脚本</li>
+<li>非常丰富的域模型来描述你的构建</li>
+</ol>
+<p>2009年7月20日发行第一个版本0.7，到现在已经发行了20个大版本，目前最新版本是2.3。从2.0版本开始，Gradle提供了C和C++的支持，使得Gradle的构建、测试和提交工作不仅限于基于JVM的系统。</p>
+<p>从2012年6月发布1.0以来，Gradle一直以八周一个新版本的速率稳步升级，从1.0到2.0，Gradle也逐渐成熟。现在越来越多的Java开发者开始使用Gradle进行项目的自动化构建</p>
+<h2 id="安装Gradle"><a href="#安装Gradle" class="headerlink" title="安装Gradle"></a>安装Gradle</h2><ol>
+<li>安装一个 Java JDK 或者 JRE. 而且 Java 版本必须至少是 6 以上</li>
+<li>从 Gradle网站<a href="http://www.gradle.org/downloads" target="_blank" rel="external">http://www.gradle.org/downloads</a>下载任意一个已经发布的版本，并解压到任意目录</li>
+<li>添加一个 GRADLE_HOME 环境变量来指明 Gradle 的安装路径</li>
+<li>添加 GRADLE_HOME/bin 到您的 PATH 环境变量中</li>
+</ol>
+<figure class="highlight elixir"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div></pre></td><td class="code"><pre><div class="line">export GRADLE_HOME=&#123;your gradle path&#125;</div><div class="line">export PATH=<span class="variable">$PATH</span><span class="symbol">:GRADLE_HOME/bin</span></div></pre></td></tr></table></figure>
+<h2 id="Gradle的基本组成"><a href="#Gradle的基本组成" class="headerlink" title="Gradle的基本组成"></a>Gradle的基本组成</h2><blockquote>
+<p>项目(Project) 和 任务(tasks)，Gradle 里的任何东西都是基于这两个基础概念。</p>
+</blockquote>
+<ul>
+<li><p>项目是指我们的构建产物（比如Jar包）或实施产物（将应用程序部署到生产环境）。</p>
+</li>
+<li><p>任务是指不可分的最小工作单元，执行构建工作（比如编译项目或执行测试）。</p>
+</li>
+<li><p>每一个构建都是由一个或多个 projects 构成的，每一个 project 是由一个或多个 tasks 构成的，一个 task是指不可分的最小工作单元，执行构建工作（比如编译项目或执行测试）</p>
+</li>
+</ul>
+<p><img src="/assets/pic1.png" alt="关系"></p>
+<p>一个工程的Build，是由多个Project组成，而一个Project又是由task组成的</p>
+<blockquote>
+<p>原创不易，欢迎转载，但还请注明出处：<a href="http://blog.waynell.com">blog.waynell.com</a></p>
+</blockquote>
+]]></content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;Gradle是一种依赖管理工具，基于Groovy语言，面向Java应用为主，它抛弃了基于XML的各种繁琐配置，取而代之的是一种基于Groovy的内部领域特定（DSL）语言。它提供灵活的通用构建工具，就像ant。同时完美兼容Maven或Ivy仓库&lt;/p&gt;
+&lt;h2 id=&quot;Gr
+    
+    </summary>
+    
+      <category term="Dev" scheme="http://blog.waynell.com/categories/Dev/"/>
+    
+    
+      <category term="Gradle" scheme="http://blog.waynell.com/tags/Gradle/"/>
+    
+  </entry>
+  
+</feed>
