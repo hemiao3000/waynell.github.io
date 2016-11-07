@@ -2,7 +2,7 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   
   <url>
-    <loc>http://blog.waynell.com/2015/04/13/gradle-use-03/</loc>
+    <loc>http://blog.waynell.com/2015/05/09/android-touch-02/</loc>
     
     <lastmod>2016-11-05T23:31:03.000Z</lastmod>
     
@@ -16,35 +16,7 @@
   </url>
   
   <url>
-    <loc>http://blog.waynell.com/2015/04/19/android-multidex/</loc>
-    
-    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
-    
-  </url>
-  
-  <url>
-    <loc>http://blog.waynell.com/2015/05/09/android-touch-02/</loc>
-    
-    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
-    
-  </url>
-  
-  <url>
-    <loc>http://blog.waynell.com/2016/07/07/fresco-memory/</loc>
-    
-    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
-    
-  </url>
-  
-  <url>
-    <loc>http://blog.waynell.com/2015/04/03/gradle-use-01/</loc>
-    
-    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
-    
-  </url>
-  
-  <url>
-    <loc>http://blog.waynell.com/2015/04/08/gradle-use-02/</loc>
+    <loc>http://blog.waynell.com/2015/12/16/android-architecture/</loc>
     
     <lastmod>2016-11-05T23:31:03.000Z</lastmod>
     
@@ -52,6 +24,27 @@
   
   <url>
     <loc>http://blog.waynell.com/2015/11/17/android-cold-start/</loc>
+    
+    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
+    
+  </url>
+  
+  <url>
+    <loc>http://blog.waynell.com/2015/04/19/android-multidex/</loc>
+    
+    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
+    
+  </url>
+  
+  <url>
+    <loc>http://blog.waynell.com/2015/04/20/android-touch-01/</loc>
+    
+    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
+    
+  </url>
+  
+  <url>
+    <loc>http://blog.waynell.com/2016/07/07/fresco-memory/</loc>
     
     <lastmod>2016-11-05T23:31:03.000Z</lastmod>
     
@@ -72,14 +65,21 @@
   </url>
   
   <url>
-    <loc>http://blog.waynell.com/2015/04/20/android-touch-01/</loc>
+    <loc>http://blog.waynell.com/2015/04/03/gradle-use-01/</loc>
     
     <lastmod>2016-11-05T23:31:03.000Z</lastmod>
     
   </url>
   
   <url>
-    <loc>http://blog.waynell.com/2015/12/16/android-architecture/</loc>
+    <loc>http://blog.waynell.com/2015/04/08/gradle-use-02/</loc>
+    
+    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
+    
+  </url>
+  
+  <url>
+    <loc>http://blog.waynell.com/2015/04/13/gradle-use-03/</loc>
     
     <lastmod>2016-11-05T23:31:03.000Z</lastmod>
     
