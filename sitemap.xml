@@ -2,7 +2,7 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   
   <url>
-    <loc>http://blog.waynell.com/2015/05/09/android-touch-02/</loc>
+    <loc>http://blog.waynell.com/2016/06/03/deep-in-dagger2/</loc>
     
     <lastmod>2016-11-05T23:31:03.000Z</lastmod>
     
@@ -16,14 +16,14 @@
   </url>
   
   <url>
-    <loc>http://blog.waynell.com/2015/12/16/android-architecture/</loc>
+    <loc>http://blog.waynell.com/2015/11/17/android-cold-start/</loc>
     
     <lastmod>2016-11-05T23:31:03.000Z</lastmod>
     
   </url>
   
   <url>
-    <loc>http://blog.waynell.com/2015/11/17/android-cold-start/</loc>
+    <loc>http://blog.waynell.com/2015/12/16/android-architecture/</loc>
     
     <lastmod>2016-11-05T23:31:03.000Z</lastmod>
     
@@ -44,7 +44,7 @@
   </url>
   
   <url>
-    <loc>http://blog.waynell.com/2016/07/07/fresco-memory/</loc>
+    <loc>http://blog.waynell.com/2015/05/09/android-touch-02/</loc>
     
     <lastmod>2016-11-05T23:31:03.000Z</lastmod>
     
@@ -58,7 +58,7 @@
   </url>
   
   <url>
-    <loc>http://blog.waynell.com/2016/06/03/deep-in-dagger2/</loc>
+    <loc>http://blog.waynell.com/2016/07/07/fresco-memory/</loc>
     
     <lastmod>2016-11-05T23:31:03.000Z</lastmod>
     
@@ -79,14 +79,14 @@
   </url>
   
   <url>
-    <loc>http://blog.waynell.com/2015/04/13/gradle-use-03/</loc>
+    <loc>http://blog.waynell.com/2015/05/29/mvp-on-android/</loc>
     
     <lastmod>2016-11-05T23:31:03.000Z</lastmod>
     
   </url>
   
   <url>
-    <loc>http://blog.waynell.com/2015/05/29/mvp-on-android/</loc>
+    <loc>http://blog.waynell.com/2015/04/13/gradle-use-03/</loc>
     
     <lastmod>2016-11-05T23:31:03.000Z</lastmod>
     
