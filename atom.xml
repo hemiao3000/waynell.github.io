@@ -5,7 +5,7 @@
   <link href="/atom.xml" rel="self"/>
   
   <link href="http://blog.waynell.com/"/>
-  <updated>2016-11-04T14:14:41.000Z</updated>
+  <updated>2016-11-08T07:36:19.000Z</updated>
   <id>http://blog.waynell.com/</id>
   
   <author>
@@ -14,6 +14,62 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title>VideoRangeSlider视频裁剪控件</title>
+    <link href="http://blog.waynell.com/2016/11/08/range-slider/"/>
+    <id>http://blog.waynell.com/2016/11/08/range-slider/</id>
+    <published>2016-11-08T05:00:32.000Z</published>
+    <updated>2016-11-08T07:36:19.000Z</updated>
+    
+    <content type="html"><![CDATA[<p>最近项目中需要用到裁剪视频操作的控件，本着不要重复造轮子的精神，在Github上找了个遍都没有发现有可用的。那就只好自己动手做了。目前已经开源到Github，欢迎Start，issue。</p>
+<p><strong>项目地址：</strong> <a href="https://github.com/waynell/VideoRangeSlider" target="_blank" rel="external">VideoRangeSlider</a></p>
+<p><img src="/assets/range-slider-preview.gif" alt="range-slider-preview"></p>
+<h4 id="基本用法"><a href="#基本用法" class="headerlink" title="基本用法"></a>基本用法</h4><ol>
+<li><p>引入依赖</p>
+<figure class="highlight groovy"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div></pre></td><td class="code"><pre><div class="line">repositories &#123;</div><div class="line">    maven &#123; url <span class="string">"https://jitpack.io"</span> &#125;</div><div class="line">&#125;</div><div class="line">dependencies &#123;</div><div class="line">  compile <span class="string">'com.github.waynell:VideoRangeSlider:1.0.1'</span></div><div class="line">&#125;</div></pre></td></tr></table></figure>
+</li>
+<li><p>在布局xml中加入控件</p>
+<figure class="highlight xml"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div></pre></td><td class="code"><pre><div class="line"><span class="tag">&lt;<span class="name">com.waynell.videorangeslider.RangeSlider</span></span></div><div class="line">        <span class="attr">app:lineHeight</span>=<span class="string">"3dp"</span></div><div class="line">        <span class="attr">app:lineColor</span>=<span class="string">"@color/colorAccent"</span></div><div class="line">        <span class="attr">app:thumbWidth</span>=<span class="string">"@dimen/range_thumb_width"</span></div><div class="line">        <span class="attr">app:tickCount</span>=<span class="string">"100"</span></div><div class="line">        <span class="attr">app:leftThumbIndex</span>=<span class="string">"10"</span></div><div class="line">        <span class="attr">app:leftThumbDrawable</span>=<span class="string">"@drawable/thumb_drawable"</span></div><div class="line">        <span class="attr">app:rightThumbDrawable</span>=<span class="string">"@drawable/thumb_drawable"</span></div><div class="line">        <span class="attr">android:id</span>=<span class="string">"@+id/range_slider"</span></div><div class="line">        <span class="attr">android:layout_width</span>=<span class="string">"match_parent"</span></div><div class="line">        <span class="attr">android:layout_height</span>=<span class="string">"66dp"</span>/&gt;</div></pre></td></tr></table></figure>
+</li>
+<li><p>给RangeSlider设置listener用于监听range变换事件</p>
+<figure class="highlight java"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div></pre></td><td class="code"><pre><div class="line">slider.setRangeChangeListener(<span class="keyword">new</span> RangeSlider.OnRangeChangeListener() &#123;</div><div class="line">	<span class="meta">@Override</span></div><div class="line">	<span class="function"><span class="keyword">public</span> <span class="keyword">void</span> <span class="title">onRangeChange</span><span class="params">(RangeSlider view, <span class="keyword">int</span> leftPinIndex, <span class="keyword">int</span> rightPinIndex)</span> </span>&#123;</div><div class="line">		textView.setText(String.format(<span class="string">"Left Index : %s, Right Index : %s "</span>, leftPinIndex, rightPinIndex));</div><div class="line">	&#125;</div><div class="line">&#125;);</div></pre></td></tr></table></figure>
+</li>
+</ol>
+<h4 id="自定义属性"><a href="#自定义属性" class="headerlink" title="自定义属性"></a>自定义属性</h4><p>目前提供以下几种自定义属性，可以通过XML或者Java代码设置</p>
+<ul>
+<li>line color 线条颜色</li>
+<li>line height 线条高度</li>
+<li>thumb width 左右两边拖动条的宽带</li>
+<li>left and right thumb drawable 左右两边拖动条的drawable</li>
+<li>left and right thumb index 左右两边拖动条的默认起始位置</li>
+<li>mask color 蒙层颜色</li>
+<li>tick count “打点”总数</li>
+</ul>
+<h4 id="实现原理"><a href="#实现原理" class="headerlink" title="实现原理"></a>实现原理</h4><p>实现原理并不复杂，总共就两个类<code>RangeSlider</code>和<code>ThumbView</code></p>
+<ul>
+<li>RangeSlider：主要类，继承ViewGroup，用于绘制ui、处理拖动事件</li>
+<li>ThumbView：绘制左右两边的拖动条，记录拖动位置</li>
+</ul>
+<ol>
+<li>首先是在RangeSlider上“打点”，打点数由tick count决定，默认5个点，可以通过<code>setTickCount(int tickCount)</code>函数增加或者减少打点数(不能少于两个点)</li>
+<li>然后根据打点数和RangeSlider的UI宽度计算每个点数的像素间距，在滑动thumb时根据滑动的距离计算滑过多少个点，滑动时会自动吸附到离当前滑动位置的最近点数</li>
+</ol>
+]]></content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;最近项目中需要用到裁剪视频操作的控件，本着不要重复造轮子的精神，在Github上找了个遍都没有发现有可用的。那就只好自己动手做了。目前已经开源到Github，欢迎Start，issue。&lt;/p&gt;
+&lt;p&gt;&lt;strong&gt;项目地址：&lt;/strong&gt; &lt;a href=&quot;http
+    
+    </summary>
+    
+      <category term="Dev" scheme="http://blog.waynell.com/categories/Dev/"/>
+    
+    
+      <category term="Android" scheme="http://blog.waynell.com/tags/Android/"/>
+    
+  </entry>
   
   <entry>
     <title>从SwipeRefreshLayout看Android Animation原理</title>
