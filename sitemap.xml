@@ -2,6 +2,13 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   
   <url>
+    <loc>http://blog.waynell.com/2017/01/04/tiny-png-plugin/</loc>
+    
+    <lastmod>2017-01-04T06:34:00.000Z</lastmod>
+    
+  </url>
+  
+  <url>
     <loc>http://blog.waynell.com/2016/11/08/range-slider/</loc>
     
     <lastmod>2016-11-08T07:36:19.000Z</lastmod>
@@ -9,7 +16,56 @@
   </url>
   
   <url>
+    <loc>http://blog.waynell.com/2016/06/03/deep-in-dagger2/</loc>
+    
+    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
+    
+  </url>
+  
+  <url>
+    <loc>http://blog.waynell.com/2015/05/29/mvp-on-android/</loc>
+    
+    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
+    
+  </url>
+  
+  <url>
+    <loc>http://blog.waynell.com/2015/04/19/android-multidex/</loc>
+    
+    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
+    
+  </url>
+  
+  <url>
+    <loc>http://blog.waynell.com/2015/05/09/android-touch-02/</loc>
+    
+    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
+    
+  </url>
+  
+  <url>
+    <loc>http://blog.waynell.com/2015/04/20/android-touch-01/</loc>
+    
+    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
+    
+  </url>
+  
+  <url>
     <loc>http://blog.waynell.com/2015/04/03/gradle-use-01/</loc>
+    
+    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
+    
+  </url>
+  
+  <url>
+    <loc>http://blog.waynell.com/2015/08/13/adapter-hell-escape/</loc>
+    
+    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
+    
+  </url>
+  
+  <url>
+    <loc>http://blog.waynell.com/2016/07/07/fresco-memory/</loc>
     
     <lastmod>2016-11-05T23:31:03.000Z</lastmod>
     
@@ -30,35 +86,7 @@
   </url>
   
   <url>
-    <loc>http://blog.waynell.com/2015/05/09/android-touch-02/</loc>
-    
-    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
-    
-  </url>
-  
-  <url>
-    <loc>http://blog.waynell.com/2016/06/03/deep-in-dagger2/</loc>
-    
-    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
-    
-  </url>
-  
-  <url>
-    <loc>http://blog.waynell.com/2015/04/19/android-multidex/</loc>
-    
-    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
-    
-  </url>
-  
-  <url>
-    <loc>http://blog.waynell.com/2015/04/20/android-touch-01/</loc>
-    
-    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
-    
-  </url>
-  
-  <url>
-    <loc>http://blog.waynell.com/2015/08/13/adapter-hell-escape/</loc>
+    <loc>http://blog.waynell.com/2016/03/21/video-loader/</loc>
     
     <lastmod>2016-11-05T23:31:03.000Z</lastmod>
     
@@ -72,13 +100,6 @@
   </url>
   
   <url>
-    <loc>http://blog.waynell.com/about/index.html</loc>
-    
-    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
-    
-  </url>
-  
-  <url>
     <loc>http://blog.waynell.com/2015/04/13/gradle-use-03/</loc>
     
     <lastmod>2016-11-05T23:31:03.000Z</lastmod>
@@ -86,21 +107,7 @@
   </url>
   
   <url>
-    <loc>http://blog.waynell.com/2015/05/29/mvp-on-android/</loc>
-    
-    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
-    
-  </url>
-  
-  <url>
-    <loc>http://blog.waynell.com/2016/07/07/fresco-memory/</loc>
-    
-    <lastmod>2016-11-05T23:31:03.000Z</lastmod>
-    
-  </url>
-  
-  <url>
-    <loc>http://blog.waynell.com/2016/03/21/video-loader/</loc>
+    <loc>http://blog.waynell.com/about/index.html</loc>
     
     <lastmod>2016-11-05T23:31:03.000Z</lastmod>
     

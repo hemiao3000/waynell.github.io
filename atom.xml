@@ -5,7 +5,7 @@
   <link href="/atom.xml" rel="self"/>
   
   <link href="http://blog.waynell.com/"/>
-  <updated>2016-11-08T07:36:19.000Z</updated>
+  <updated>2017-01-04T06:34:00.000Z</updated>
   <id>http://blog.waynell.com/</id>
   
   <author>
@@ -14,6 +14,40 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title>TinyPngPlugin，批量压缩项目中的图片，让你的 APK 体积缩小 100%</title>
+    <link href="http://blog.waynell.com/2017/01/04/tiny-png-plugin/"/>
+    <id>http://blog.waynell.com/2017/01/04/tiny-png-plugin/</id>
+    <published>2017-01-04T06:17:36.000Z</published>
+    <updated>2017-01-04T06:34:00.000Z</updated>
+    
+    <content type="html"><![CDATA[<p><a href="https://tinypng.com/" target="_blank" rel="external">TinyPng</a>是一个支持压缩png和jpg图片格式的网站，通过其独特的算法（通过一种叫“量化”的技术，把原本png文件的24位真彩色压缩为8位的索引演示，是一 种矢量压缩方法，把颜色值用数值123等代替）可以实现在无损压缩的情况下图片文件大小缩小到原来的30%-50%</p>
+<p>在做项目时我们经常会用到<a href="https://tinypng.com/" target="_blank" rel="external">TinyPng</a>来压缩我们的图片，可是多数情况下，我们都是都是到网站手动上传压缩再下载，然后再拷回到项目中去，流程还是挺麻烦的，做为新世纪的码农，这样的工作必须是要自动化的啊</p>
+<p>于是就想搞个插件能批量处理项目中的图片，看到 Github 上已经有人写过类似的插件：<a href="https://github.com/mogujie/TinyPIC_Gradle_Plugin" target="_blank" rel="external">TinyPIC_Gradle_Plugin</a>，但是存在了以下一些问题：</p>
+<ul>
+<li>不支持多模块</li>
+<li>不支持多资源目录</li>
+<li>在处理已经被压缩过的图片时只是根据文件名来简单的判断是否需要再次压缩</li>
+<li>压缩图片任务依赖编译流程，每次编译项目都会跑这个任务</li>
+</ul>
+<p>看作者已经很久不维护那个项目了，于是只好自己动手丰衣足食了，重新写了一个插件，改进了上面所提到的问题</p>
+<p><strong> Github 地址：<a href="https://github.com/waynell/TinyPngPlugin" target="_blank" rel="external">TinyPngPlugin</a><br>欢迎 Start ，试用，并反馈问题
+</strong></p>
+]]></content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;&lt;a href=&quot;https://tinypng.com/&quot; target=&quot;_blank&quot; rel=&quot;external&quot;&gt;TinyPng&lt;/a&gt;是一个支持压缩png和jpg图片格式的网站，通过其独特的算法（通过一种叫“量化”的技术，把原本png文件的24位真彩色压缩为8位
+    
+    </summary>
+    
+      <category term="Dev" scheme="http://blog.waynell.com/categories/Dev/"/>
+    
+    
+      <category term="Gradle" scheme="http://blog.waynell.com/tags/Gradle/"/>
+    
+  </entry>
   
   <entry>
     <title>VideoRangeSlider视频裁剪控件</title>
