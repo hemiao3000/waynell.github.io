@@ -5,7 +5,7 @@
   <link href="/atom.xml" rel="self"/>
   
   <link href="http://blog.waynell.com/"/>
-  <updated>2017-01-04T06:34:00.000Z</updated>
+  <updated>2017-01-05T02:43:12.000Z</updated>
   <id>http://blog.waynell.com/</id>
   
   <author>
@@ -16,11 +16,11 @@
   <generator uri="http://hexo.io/">Hexo</generator>
   
   <entry>
-    <title>TinyPngPlugin，批量压缩项目中的图片，让你的 APK 体积缩小 100%</title>
+    <title>TinyPngPlugin，批量压缩项目中的图片，让你的 APK 体积缩小30%</title>
     <link href="http://blog.waynell.com/2017/01/04/tiny-png-plugin/"/>
     <id>http://blog.waynell.com/2017/01/04/tiny-png-plugin/</id>
     <published>2017-01-04T06:17:36.000Z</published>
-    <updated>2017-01-04T06:34:00.000Z</updated>
+    <updated>2017-01-05T02:43:12.000Z</updated>
     
     <content type="html"><![CDATA[<p><a href="https://tinypng.com/" target="_blank" rel="external">TinyPng</a>是一个支持压缩png和jpg图片格式的网站，通过其独特的算法（通过一种叫“量化”的技术，把原本png文件的24位真彩色压缩为8位的索引演示，是一 种矢量压缩方法，把颜色值用数值123等代替）可以实现在无损压缩的情况下图片文件大小缩小到原来的30%-50%</p>
 <p>在做项目时我们经常会用到<a href="https://tinypng.com/" target="_blank" rel="external">TinyPng</a>来压缩我们的图片，可是多数情况下，我们都是都是到网站手动上传压缩再下载，然后再拷回到项目中去，流程还是挺麻烦的，做为新世纪的码农，这样的工作必须是要自动化的啊</p>
